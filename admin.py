@@ -57,6 +57,15 @@ def safe_filename(name: str) -> str:
     return "".join(c if c.isalnum() or c in ("-", "_", ".") else "_" for c in name)
 
 
+def safe_sql_value(val: str) -> str:
+    if not val:
+        raise ValueError("ค่าว่างไม่ได้")
+    bad = ["'", '"', ";", "\\", "\x00", "\n", "\r", "`"]
+    if any(c in val for c in bad):
+        raise ValueError(f"พบอักขระต้องห้ามในค่า: {val}")
+    return val
+
+
 def ensure_dir(path: str):
     Path(path).mkdir(parents=True, exist_ok=True)
 
@@ -274,6 +283,59 @@ def cmd_plesk_help(args):
     run_cmd(cmd, check=True, capture_output=False)
 
 
+def cmd_view_ftp(args):
+    if args.all:
+        sql = (
+            "SELECT IFNULL(d.name, '-') AS domain, s.login, a.password, a.type "
+            "FROM sys_users s "
+            "JOIN accounts a ON s.account_id = a.id "
+            "LEFT JOIN domains d ON d.sys_user_id = s.id "
+            "ORDER BY d.name, s.login"
+        )
+    elif args.user:
+        user = safe_sql_value(args.user)
+        sql = (
+            "SELECT IFNULL(d.name, '-') AS domain, s.login, a.password, a.type "
+            "FROM sys_users s "
+            "JOIN accounts a ON s.account_id = a.id "
+            "LEFT JOIN domains d ON d.sys_user_id = s.id "
+            f"WHERE s.login = '{user}'"
+        )
+    elif args.domain:
+        domain = safe_sql_value(args.domain)
+        sql = (
+            "SELECT d.name AS domain, s.login, a.password, a.type "
+            "FROM domains d "
+            "JOIN sys_users s ON d.sys_user_id = s.id "
+            "JOIN accounts a ON s.account_id = a.id "
+            f"WHERE d.name = '{domain}'"
+        )
+    else:
+        eprint("ERROR: ต้องระบุ domain หรือ --user หรือ --all")
+        sys.exit(1)
+
+    cmd = ["plesk", "db", "-N", "-B", "-e", sql]
+    proc = run_cmd(cmd, check=True, capture_output=True)
+
+    rows = [line for line in proc.stdout.splitlines() if line.strip()]
+    if not rows:
+        print("ไม่พบข้อมูล FTP")
+        return
+
+    print(f"{'domain':<28} {'ftp_user':<22} {'password':<40} type")
+    print("-" * 105)
+    for line in rows:
+        parts = line.split("\t")
+        while len(parts) < 4:
+            parts.append("")
+        d, login, pwd, ptype = parts[:4]
+        print(f"{d:<28} {login:<22} {pwd:<40} {ptype}")
+    print(
+        "\nหมายเหตุ: ถ้า type ไม่ใช่ 'plain' ให้ถอดรหัสด้วย "
+        "/usr/local/psa/admin/sbin/encrypt3"
+    )
+
+
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="admin.py",
@@ -288,6 +350,9 @@ def build_parser():
             "  admin.py restore-subscription /root/backups/example.com.tar --only databases --domain example.com\n"
             "  admin.py scheduled-backup-list\n"
             "  admin.py scheduled-backup-config --frequency daily --time 03:30\n"
+            "  admin.py view-ftp example.com\n"
+            "  admin.py view-ftp --user webuser1\n"
+            "  admin.py view-ftp --all\n"
             "  admin.py plesk-help site\n"
             "  admin.py plesk-help subscription\n"
             "  admin.py plesk-help pleskbackup\n"
@@ -383,11 +448,218 @@ def build_parser():
     p.add_argument("utility", help="เช่น site, subscription, pleskbackup, pleskrestore, scheduled-backup")
     p.set_defaults(func=cmd_plesk_help)
 
+    p = sub.add_parser("view-ftp", help="ดูรหัสผ่าน FTP ของโดเมน/ผู้ใช้")
+    p.add_argument("domain", nargs="?", help="ชื่อโดเมน (ไม่ต้องใส่ถ้าใช้ --user หรือ --all)")
+    p.add_argument("--user", help="ระบุชื่อ FTP user")
+    p.add_argument("--all", action="store_true", help="แสดงทั้งหมด")
+    p.set_defaults(func=cmd_view_ftp)
+
     return parser
+
+
+def prompt(label, default=None, required=True):
+    suffix = f" [{default}]" if default not in (None, "") else ""
+    while True:
+        try:
+            val = input(f"{label}{suffix}: ").strip()
+        except EOFError:
+            print()
+            return default if default is not None else ""
+        if val:
+            return val
+        if default is not None:
+            return default
+        if not required:
+            return ""
+        print("กรุณากรอกค่า")
+
+
+def prompt_yes_no(label, default=False):
+    suffix = "[Y/n]" if default else "[y/N]"
+    try:
+        val = input(f"{label} {suffix}: ").strip().lower()
+    except EOFError:
+        print()
+        return default
+    if not val:
+        return default
+    return val in ("y", "yes")
+
+
+def menu_list():
+    cmd_list(argparse.Namespace())
+
+
+def menu_rename_domain():
+    old = prompt("โดเมนเดิม")
+    new = prompt("โดเมนใหม่")
+    dry = prompt_yes_no("Dry run?", default=False)
+    cmd_rename_domain(argparse.Namespace(old_domain=old, new_domain=new, dry_run=dry))
+
+
+def menu_backup_subscription():
+    domain = prompt("ชื่อโดเมน/subscription")
+    default_out = f"/root/backups/{safe_filename(domain)}_{now_ts()}.tar"
+    output = prompt("ไฟล์ปลายทาง", default=default_out)
+    incremental = prompt_yes_no("Incremental?", default=False)
+    keep_local = prompt_yes_no("Keep local backup?", default=False)
+    dry = prompt_yes_no("Dry run?", default=False)
+    cmd_backup_subscription(argparse.Namespace(
+        domain=domain, output=output, incremental=incremental,
+        keep_local_backup=keep_local, verbose=0, dry_run=dry,
+    ))
+
+
+def menu_restore_subscription():
+    backup_file = prompt("ไฟล์ backup")
+    only = prompt("Restore อะไร? (all/databases/web/dns)", default="all")
+    domain = ""
+    if only in ("databases", "web", "dns"):
+        domain = prompt("ชื่อโดเมน")
+    config_only = prompt_yes_no("Configuration only?", default=False)
+    content_only = prompt_yes_no("Content only?", default=False)
+    verbose = prompt_yes_no("Verbose?", default=False)
+    dry = prompt_yes_no("Dry run?", default=False)
+    cmd_restore_subscription(argparse.Namespace(
+        backup_file=backup_file, only=only, domain=domain or None,
+        configuration_only=config_only, content_only=content_only,
+        verbose=verbose, dry_run=dry,
+    ))
+
+
+def menu_backup_site_files():
+    domain = prompt("ชื่อโดเมน")
+    output_dir = prompt("โฟลเดอร์เก็บ backup", default="/root/backups")
+    vhosts_root = prompt("Vhosts root", default=DEFAULT_VHOSTS_ROOT)
+    source = prompt("Source path (เว้นว่างเพื่อใช้ httpdocs)", default="", required=False)
+    exclude_str = prompt("Exclude (คั่นด้วย comma)", default="", required=False)
+    exclude = [x.strip() for x in exclude_str.split(",") if x.strip()] if exclude_str else []
+    dry = prompt_yes_no("Dry run?", default=False)
+    cmd_backup_site_files(argparse.Namespace(
+        domain=domain, output_dir=output_dir, vhosts_root=vhosts_root,
+        source=source or None, exclude=exclude, dry_run=dry,
+    ))
+
+
+def menu_backup_db():
+    db_name = prompt("ชื่อฐานข้อมูล")
+    db_user = prompt("DB user")
+    db_pass = prompt("DB password")
+    host = prompt("DB host", default="127.0.0.1")
+    port = prompt("DB port", default="3306")
+    engine = prompt("Engine (mysql/mariadb)", default="mysql")
+    output_dir = prompt("โฟลเดอร์เก็บ backup", default="/root/backups")
+    gzip_v = prompt_yes_no("Gzip?", default=True)
+    dry = prompt_yes_no("Dry run?", default=False)
+    cmd_backup_db(argparse.Namespace(
+        db_name=db_name, db_user=db_user, db_pass=db_pass,
+        host=host, port=port, engine=engine,
+        output_dir=output_dir, gzip=gzip_v, dry_run=dry,
+    ))
+
+
+def menu_view_ftp():
+    print("  1) ดูตามโดเมน")
+    print("  2) ดูตามชื่อ user")
+    print("  3) แสดงทั้งหมด")
+    choice = prompt("เลือก", default="1")
+    domain = user = None
+    all_flag = False
+    if choice == "1":
+        domain = prompt("ชื่อโดเมน")
+    elif choice == "2":
+        user = prompt("ชื่อ FTP user")
+    elif choice == "3":
+        all_flag = True
+    else:
+        print("ตัวเลือกไม่ถูกต้อง")
+        return
+    cmd_view_ftp(argparse.Namespace(domain=domain, user=user, all=all_flag))
+
+
+def menu_scheduled_list():
+    cmd_list_scheduled_backups(argparse.Namespace())
+
+
+def menu_scheduled_config():
+    frequency = prompt("Frequency (hourly/daily/weekly/monthly)", default="daily")
+    storage = prompt("Storage (server/ftp/google-drive-backup)", default="server")
+    time_v = prompt("เวลา", default="03:30")
+    weekday = "sunday"
+    monthday = "last"
+    if frequency == "weekly":
+        weekday = prompt("วัน", default="sunday")
+    if frequency == "monthly":
+        monthday = prompt("วันที่ของเดือน (1-31 หรือ last)", default="last")
+    incremental = prompt_yes_no("Incremental?", default=False)
+    excl_mail = prompt_yes_no("Exclude mail?", default=False)
+    excl_user = prompt_yes_no("Exclude user files?", default=False)
+    excl_db = prompt_yes_no("Exclude databases?", default=False)
+    keep_in_server = prompt("Keep in server storage? (true/false/ว่าง)", default="", required=False)
+    keep_val = None if not keep_in_server else (keep_in_server.lower() == "true")
+    dry = prompt_yes_no("Dry run?", default=False)
+    cmd_configure_scheduled_backup(argparse.Namespace(
+        frequency=frequency, storage=storage, time=time_v,
+        weekday=weekday, monthday=monthday,
+        incremental=incremental, exclude_mail=excl_mail,
+        exclude_user_files=excl_user, exclude_databases=excl_db,
+        keep_in_server_storage=keep_val, dry_run=dry,
+    ))
+
+
+def menu_plesk_help():
+    utility = prompt("Utility (เช่น site, subscription, pleskbackup)")
+    cmd_plesk_help(argparse.Namespace(utility=utility))
+
+
+MENU_ITEMS = [
+    ("1", "List domains", menu_list),
+    ("2", "Rename domain", menu_rename_domain),
+    ("3", "Backup subscription", menu_backup_subscription),
+    ("4", "Restore subscription", menu_restore_subscription),
+    ("5", "Backup site files", menu_backup_site_files),
+    ("6", "Backup database", menu_backup_db),
+    ("7", "ดูรหัส FTP", menu_view_ftp),
+    ("8", "List scheduled backups", menu_scheduled_list),
+    ("9", "Configure scheduled backup", menu_scheduled_config),
+    ("10", "Plesk help", menu_plesk_help),
+    ("0", "ออก", None),
+]
+
+
+def interactive_menu():
+    while True:
+        print("\n=== Plesk Admin Menu ===")
+        for key, label, _ in MENU_ITEMS:
+            print(f"  {key}) {label}")
+        try:
+            choice = input("\nเลือกหมายเลข: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        for key, _label, action in MENU_ITEMS:
+            if choice == key:
+                if action is None:
+                    return
+                try:
+                    action()
+                except KeyboardInterrupt:
+                    print("\nยกเลิก")
+                except SystemExit as e:
+                    if e.code:
+                        eprint(f"คำสั่งล้มเหลว (exit {e.code})")
+                except Exception as e:
+                    eprint(f"ERROR: {e}")
+                break
+        else:
+            print("ตัวเลือกไม่ถูกต้อง")
 
 
 def main():
     require_root()
+    if len(sys.argv) == 1:
+        interactive_menu()
+        return
     parser = build_parser()
     args = parser.parse_args()
     args.func(args)
