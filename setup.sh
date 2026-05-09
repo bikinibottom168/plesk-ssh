@@ -3,6 +3,7 @@ set -euo pipefail
 
 INSTALL_DIR="/opt/plesk-dashboard"
 CONFIG_DIR="/etc/plesk-dashboard"
+VENV_DIR="$INSTALL_DIR/venv"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "ต้องรันด้วย root หรือ sudo" >&2
@@ -11,12 +12,93 @@ fi
 
 SOURCE_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# ---------- check + install OS packages ----------
+echo "==> ตรวจสอบเครื่องมือที่จำเป็น"
+
+declare -a missing=()
+declare -a missing_pkgs=()
+
+check() {
+  # check <command-or-python-mod> <kind: cmd|pymod> <pkg-name>
+  local target="$1" kind="$2" pkg="$3"
+  local present=0
+  case "$kind" in
+    cmd)   command -v "$target" >/dev/null 2>&1 && present=1 ;;
+    pymod) python3 -c "import $target" >/dev/null 2>&1 && present=1 ;;
+    file)  [ -e "$target" ] && present=1 ;;
+  esac
+  if [ "$present" -eq 1 ]; then
+    printf "    \xe2\x9c\x93 %s\n" "$target"
+  else
+    printf "    \xe2\x9c\x97 %s -> จะติดตั้ง %s\n" "$target" "$pkg"
+    missing+=("$target")
+    missing_pkgs+=("$pkg")
+  fi
+}
+
+# Detect package manager
+PKG_MGR=""
+if   command -v apt-get >/dev/null 2>&1; then PKG_MGR=apt
+elif command -v dnf     >/dev/null 2>&1; then PKG_MGR=dnf
+elif command -v yum     >/dev/null 2>&1; then PKG_MGR=yum
+fi
+
+if [ -z "$PKG_MGR" ]; then
+  echo "    ไม่รู้จัก package manager — ตรวจสอบเองให้ครบ" >&2
+fi
+
+# pkg names by distro
+if [ "$PKG_MGR" = "apt" ]; then
+  PKG_VENV=python3-venv
+  PKG_PIP=python3-pip
+  PKG_MYSQLDUMP=mariadb-client
+else
+  PKG_VENV=python3
+  PKG_PIP=python3-pip
+  PKG_MYSQLDUMP=mariadb
+fi
+
+check venv     pymod "$PKG_VENV"
+check ensurepip pymod "$PKG_PIP"
+check openssl   cmd   openssl
+check rsync     cmd   rsync
+check mysqldump cmd   "$PKG_MYSQLDUMP"
+check tar       cmd   tar
+check gzip      cmd   gzip
+check /etc/ssl/certs/ca-certificates.crt file ca-certificates
+
+if [ ${#missing_pkgs[@]} -gt 0 ] && [ -n "$PKG_MGR" ]; then
+  # de-dup
+  uniq_pkgs=$(printf "%s\n" "${missing_pkgs[@]}" | awk '!seen[$0]++' | tr '\n' ' ')
+  echo "==> ติดตั้ง: $uniq_pkgs"
+  case "$PKG_MGR" in
+    apt) apt-get update && apt-get install -y $uniq_pkgs ;;
+    dnf) dnf install -y $uniq_pkgs ;;
+    yum) yum install -y $uniq_pkgs ;;
+  esac
+fi
+
+# Plesk presence (required, but don't install — it's the host platform)
+if ! command -v plesk >/dev/null 2>&1; then
+  echo "    !! ไม่พบคำสั่ง 'plesk' — UI ส่วนใหญ่จะใช้งานไม่ได้บนเครื่องนี้" >&2
+else
+  echo "    ✓ plesk"
+fi
+
+# ---------- venv + Python deps ----------
 echo "==> สร้าง directories"
 install -d -m 750 "$INSTALL_DIR" "$CONFIG_DIR"
 
-echo "==> ติดตั้ง Python deps"
-python3 -m pip install --upgrade -r "$SOURCE_DIR/requirements.txt"
+echo "==> สร้าง virtualenv ที่ $VENV_DIR"
+if [ ! -d "$VENV_DIR" ]; then
+  python3 -m venv "$VENV_DIR"
+fi
 
+echo "==> ติดตั้ง Python deps ใน venv"
+"$VENV_DIR/bin/pip" install --upgrade pip
+"$VENV_DIR/bin/pip" install --upgrade -r "$SOURCE_DIR/requirements.txt"
+
+# ---------- self-signed cert ----------
 echo "==> สร้าง self-signed cert (ถ้ายังไม่มี)"
 if [ ! -f "$CONFIG_DIR/cert.pem" ]; then
   openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
@@ -26,41 +108,60 @@ if [ ! -f "$CONFIG_DIR/cert.pem" ]; then
   chmod 640 "$CONFIG_DIR/cert.pem" "$CONFIG_DIR/key.pem"
 fi
 
+# ---------- config ----------
 echo "==> สร้าง config (ถ้ายังไม่มี)"
 if [ ! -f "$CONFIG_DIR/config.json" ]; then
   cp "$SOURCE_DIR/config.example.json" "$CONFIG_DIR/config.json"
   SECRET=$(openssl rand -hex 32)
   sed -i "s|CHANGE_ME_TO_RANDOM_64_HEX_CHARS|$SECRET|" "$CONFIG_DIR/config.json"
-  echo
-  echo "*** สร้าง bcrypt hash ของรหัส admin ก่อน:"
-  echo "***   python3 $INSTALL_DIR/server.py --hash-password 'YOUR_PASSWORD'"
-  echo "*** แล้วเอาไปใส่ใน $CONFIG_DIR/config.json ที่ key users.admin"
-  echo
 fi
 
+# ---------- copy files ----------
 echo "==> Copy ไฟล์ไป $INSTALL_DIR"
-rsync -a --delete \
-  --exclude '.git' --exclude '__pycache__' --exclude 'config.json' \
-  "$SOURCE_DIR/" "$INSTALL_DIR/"
+if command -v rsync >/dev/null 2>&1; then
+  rsync -a \
+    --exclude '.git' --exclude '__pycache__' \
+    --exclude 'config.json' --exclude 'venv' \
+    "$SOURCE_DIR/" "$INSTALL_DIR/"
+else
+  for item in admin.py server.py requirements.txt config.example.json \
+              plesk-dashboard.service templates README-dashboard.md; do
+    if [ -e "$SOURCE_DIR/$item" ]; then
+      cp -a "$SOURCE_DIR/$item" "$INSTALL_DIR/"
+    fi
+  done
+fi
 
+# ---------- systemd ----------
 echo "==> ติดตั้ง systemd unit"
 cp "$SOURCE_DIR/plesk-dashboard.service" /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable plesk-dashboard
 
+# ---------- firewall ----------
 echo "==> เปิด firewall ports"
 if command -v plesk >/dev/null 2>&1; then
   plesk bin firewall --add-rule -name plesk-dashboard \
     -ports "9080:tcp,9443:tcp" -direction input -action allow 2>/dev/null || true
 fi
 
+# ---------- done ----------
 cat <<EOF
 
-ติดตั้งเสร็จ
-  1) ตั้งรหัส:    python3 $INSTALL_DIR/server.py --hash-password 'PASSWORD'
-                   เอา hash ไปใส่ใน $CONFIG_DIR/config.json (users.admin)
-  2) สตาร์ท:      systemctl start plesk-dashboard
-  3) ดู log:      journalctl -u plesk-dashboard -f
-  4) เปิดเว็บ:    https://<server-ip>:9443
+ติดตั้งเสร็จเรียบร้อย
+
+  1) ตั้งรหัส admin:
+       $VENV_DIR/bin/python $INSTALL_DIR/server.py --hash-password 'YOUR_PASSWORD'
+     เอา hash ที่ได้ไปใส่ใน $CONFIG_DIR/config.json (key: users.admin)
+
+  2) สตาร์ท:
+       systemctl start plesk-dashboard
+
+  3) ตรวจสอบ:
+       systemctl status plesk-dashboard
+       journalctl -u plesk-dashboard -f
+
+  4) เปิดเว็บ:
+       https://<server-ip>:9443
 
 EOF
