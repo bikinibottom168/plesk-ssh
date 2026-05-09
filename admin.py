@@ -283,43 +283,88 @@ def cmd_plesk_help(args):
     run_cmd(cmd, check=True, capture_output=False)
 
 
+def plesk_db_query(sql: str):
+    proc = subprocess.run(
+        ["plesk", "db", "-N", "-B"],
+        input=sql,
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        eprint(proc.stderr.strip() or proc.stdout.strip() or "plesk db failed")
+        sys.exit(proc.returncode)
+
+    rows = []
+    for line in proc.stdout.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        if s.startswith("---"):
+            continue
+        upper = s.upper()
+        if upper.startswith(("SELECT ", "INSERT ", "UPDATE ", "DELETE ", "USE ", "SHOW ")):
+            continue
+        rows.append(line)
+    return rows
+
+
+def try_decrypt_password(encrypted: str) -> str:
+    if not encrypted or not encrypted.startswith("$AES"):
+        return encrypted
+    enc_tool = "/usr/local/psa/admin/sbin/encrypt3"
+    key_file = "/etc/psa/private/secret_key"
+    if not os.path.exists(enc_tool) or not os.path.exists(key_file):
+        return encrypted
+    try:
+        proc = subprocess.run(
+            [enc_tool, "-d", "-data", encrypted, "-secret-key-file", key_file],
+            text=True,
+            capture_output=True,
+            timeout=5,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            return proc.stdout.strip()
+    except Exception:
+        pass
+    return encrypted
+
+
 def cmd_view_ftp(args):
     if args.all:
         sql = (
-            "SELECT IFNULL(d.name, '-') AS domain, s.login, a.password, a.type "
+            "SELECT IFNULL(d.name, '-'), s.login, a.password, a.type "
             "FROM sys_users s "
             "JOIN accounts a ON s.account_id = a.id "
             "LEFT JOIN domains d ON d.sys_user_id = s.id "
-            "ORDER BY d.name, s.login"
+            "ORDER BY d.name, s.login;"
         )
     elif args.user:
         user = safe_sql_value(args.user)
         sql = (
-            "SELECT IFNULL(d.name, '-') AS domain, s.login, a.password, a.type "
+            "SELECT IFNULL(d.name, '-'), s.login, a.password, a.type "
             "FROM sys_users s "
             "JOIN accounts a ON s.account_id = a.id "
             "LEFT JOIN domains d ON d.sys_user_id = s.id "
-            f"WHERE s.login = '{user}'"
+            f"WHERE s.login = '{user}';"
         )
     elif args.domain:
         domain = safe_sql_value(args.domain)
         sql = (
-            "SELECT d.name AS domain, s.login, a.password, a.type "
+            "SELECT d.name, s.login, a.password, a.type "
             "FROM domains d "
             "JOIN sys_users s ON d.sys_user_id = s.id "
             "JOIN accounts a ON s.account_id = a.id "
-            f"WHERE d.name = '{domain}'"
+            f"WHERE d.name = '{domain}';"
         )
     else:
         eprint("ERROR: ต้องระบุ domain หรือ --user หรือ --all")
         sys.exit(1)
 
-    cmd = ["plesk", "db", "-N", "-B", "-e", sql]
-    proc = run_cmd(cmd, check=True, capture_output=True)
-
-    rows = [line for line in proc.stdout.splitlines() if line.strip()]
+    rows = plesk_db_query(sql)
     if not rows:
-        print("ไม่พบข้อมูล FTP")
+        print("ไม่พบข้อมูล FTP สำหรับเงื่อนไขนี้")
+        if args.domain:
+            print(f"  ลอง: admin.py view-ftp --all | grep {args.domain}")
         return
 
     print(f"{'domain':<28} {'ftp_user':<22} {'password':<40} type")
@@ -329,11 +374,8 @@ def cmd_view_ftp(args):
         while len(parts) < 4:
             parts.append("")
         d, login, pwd, ptype = parts[:4]
+        pwd = try_decrypt_password(pwd)
         print(f"{d:<28} {login:<22} {pwd:<40} {ptype}")
-    print(
-        "\nหมายเหตุ: ถ้า type ไม่ใช่ 'plain' ให้ถอดรหัสด้วย "
-        "/usr/local/psa/admin/sbin/encrypt3"
-    )
 
 
 def build_parser():

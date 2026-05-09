@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}สำรองข้อมูล · Plesk Dashboard{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-6">สำรองข้อมูล</h1>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+  <div class="bg-slate-800 rounded-lg border border-slate-700 p-5">
+    <h2 class="text-sm font-semibold text-slate-300 mb-1">Subscription (Plesk backup)</h2>
+    <p class="text-xs text-slate-500 mb-3">backup ทั้ง subscription ผ่าน pleskbackup</p>
+    <form hx-post="/backup/subscription" hx-target="#output" hx-swap="innerHTML" class="space-y-3">
+      <select name="domain" required class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm">
+        <option value="">เลือกโดเมน...</option>
+        {% for d in domains %}<option value="{{ d.name }}" {% if d.name == selected_domain %}selected{% endif %}>{{ d.name }}</option>{% endfor %}
+      </select>
+      <label class="flex items-center gap-2 text-sm"><input type="checkbox" name="incremental" value="1"> Incremental</label>
+      <button class="w-full px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded text-sm">เริ่ม backup</button>
+    </form>
+  </div>
+
+  <div class="bg-slate-800 rounded-lg border border-slate-700 p-5">
+    <h2 class="text-sm font-semibold text-slate-300 mb-1">Files (tar.gz)</h2>
+    <p class="text-xs text-slate-500 mb-3">backup เฉพาะไฟล์เว็บ (httpdocs)</p>
+    <form hx-post="/backup/files" hx-target="#output" hx-swap="innerHTML" class="space-y-3">
+      <select name="domain" required class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm">
+        <option value="">เลือกโดเมน...</option>
+        {% for d in domains %}<option value="{{ d.name }}">{{ d.name }}</option>{% endfor %}
+      </select>
+      <input name="exclude" placeholder="exclude (คั่น ,) เช่น cache,logs" class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm">
+      <button class="w-full px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded text-sm">เริ่ม backup</button>
+    </form>
+  </div>
+
+  <div class="bg-slate-800 rounded-lg border border-slate-700 p-5">
+    <h2 class="text-sm font-semibold text-slate-300 mb-1">Database (mysqldump)</h2>
+    <p class="text-xs text-slate-500 mb-3">backup ฐานข้อมูล MySQL/MariaDB</p>
+    <form hx-post="/backup/db" hx-target="#output" hx-swap="innerHTML" class="space-y-2">
+      <input name="db_name" placeholder="ชื่อฐานข้อมูล" required class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm">
+      <input name="db_user" placeholder="DB user" required class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm">
+      <input name="db_pass" placeholder="DB password" type="password" required class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm">
+      <input name="host" placeholder="host" value="127.0.0.1" class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm">
+      <label class="flex items-center gap-2 text-sm"><input type="checkbox" name="gzip" value="1" checked> gzip</label>
+      <button class="w-full px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded text-sm">เริ่ม backup</button>
+    </form>
+  </div>
+</div>
+
+<div class="bg-slate-800 rounded-lg border border-slate-700 p-5">
+  <h2 class="text-sm font-semibold text-slate-300 mb-3">ผลลัพธ์</h2>
+  <pre id="output" class="text-xs bg-slate-950 p-4 rounded border border-slate-700 max-h-96 overflow-auto whitespace-pre-wrap">รออินพุต...</pre>
+  <p class="text-xs text-slate-500 mt-2">ไฟล์ปลายทาง: <code>{{ backup_dir }}</code></p>
+</div>
+{% endblock %}

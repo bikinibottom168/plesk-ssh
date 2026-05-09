@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}แดชบอร์ด · Plesk Dashboard{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-6">แดชบอร์ด</h1>
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+  <a href="/domains" class="block p-5 bg-slate-800 rounded-lg border border-slate-700 hover:border-blue-500 transition">
+    <div class="text-slate-400 text-xs uppercase tracking-wide">โดเมน</div>
+    <div class="text-3xl font-semibold mt-2">{{ domain_count }}</div>
+  </a>
+  <a href="/backup" class="block p-5 bg-slate-800 rounded-lg border border-slate-700 hover:border-blue-500 transition">
+    <div class="text-slate-400 text-xs uppercase tracking-wide">สำรอง</div>
+    <div class="text-lg font-medium mt-2">สร้าง backup</div>
+  </a>
+  <a href="/ftp" class="block p-5 bg-slate-800 rounded-lg border border-slate-700 hover:border-blue-500 transition">
+    <div class="text-slate-400 text-xs uppercase tracking-wide">FTP</div>
+    <div class="text-lg font-medium mt-2">ดูรหัสผ่าน</div>
+  </a>
+  <a href="/files" class="block p-5 bg-slate-800 rounded-lg border border-slate-700 hover:border-blue-500 transition">
+    <div class="text-slate-400 text-xs uppercase tracking-wide">ไฟล์</div>
+    <div class="text-lg font-medium mt-2">จัดการไฟล์</div>
+  </a>
+</div>
+
+<div class="bg-slate-800 rounded-lg border border-slate-700 p-5">
+  <h2 class="text-sm font-semibold text-slate-300 mb-3">ลิงก์ด่วน</h2>
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+    <a href="{{ plesk_panel_url }}" target="_blank" class="text-blue-400 hover:underline">Plesk Panel ↗</a>
+    <a href="{{ plesk_panel_url }}/phpmyadmin/" target="_blank" class="text-blue-400 hover:underline">phpMyAdmin ↗</a>
+    <a href="/databases" class="text-blue-400 hover:underline">รายการฐานข้อมูล</a>
+    <a href="/domains" class="text-blue-400 hover:underline">รายการโดเมน</a>
+  </div>
+</div>
+{% endblock %}

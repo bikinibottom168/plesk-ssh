@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{% block title %}Plesk Dashboard{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Sarabun", sans-serif; }
+    .nav-link.active { background: rgba(59,130,246,.15); color: rgb(96,165,250); }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen">
+  {% if user %}
+  <div class="flex min-h-screen">
+    <aside class="w-60 bg-slate-950 border-r border-slate-800 flex flex-col">
+      <div class="px-5 py-5 border-b border-slate-800">
+        <div class="text-lg font-semibold">Plesk Dashboard</div>
+        <div class="text-xs text-slate-500 mt-0.5">{{ user }}</div>
+      </div>
+      <nav class="flex-1 p-3 space-y-1 text-sm">
+        {% set items = [
+          ('dashboard', '/', 'แดชบอร์ด', 'home'),
+          ('domains', '/domains', 'โดเมน', 'globe'),
+          ('ftp', '/ftp', 'FTP / รหัสผ่าน', 'key'),
+          ('backup', '/backup', 'สำรองข้อมูล', 'archive'),
+          ('files', '/files', 'จัดการไฟล์', 'folder'),
+          ('databases', '/databases', 'ฐานข้อมูล', 'database'),
+        ] %}
+        {% for key, href, label, _icon in items %}
+          <a href="{{ href }}" class="nav-link block px-3 py-2 rounded {% if active == key %}active{% else %}hover:bg-slate-800{% endif %}">{{ label }}</a>
+        {% endfor %}
+      </nav>
+      <div class="p-3 border-t border-slate-800">
+        <a href="{{ plesk_panel_url }}" target="_blank" class="block px-3 py-2 text-xs text-slate-400 hover:text-slate-200">เปิด Plesk Panel ↗</a>
+        <a href="/logout" class="block px-3 py-2 text-xs text-rose-400 hover:text-rose-300">ออกจากระบบ</a>
+      </div>
+    </aside>
+    <main class="flex-1 p-8">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+  {% else %}
+    {% block bare %}{% endblock %}
+  {% endif %}
+</body>
+</html>

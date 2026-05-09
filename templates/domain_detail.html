@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}{{ domain }} · Plesk Dashboard{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <div>
+    <a href="/domains" class="text-xs text-slate-400 hover:text-slate-200">← โดเมนทั้งหมด</a>
+    <h1 class="text-2xl font-semibold mt-1 font-mono">{{ domain }}</h1>
+  </div>
+  <div class="space-x-2">
+    <a href="/ftp?domain={{ domain }}" class="px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded text-sm">ดู FTP</a>
+    <a href="/files?path={{ domain }}" class="px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded text-sm">เปิดไฟล์</a>
+    <a href="http://{{ domain }}" target="_blank" class="px-3 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm">เปิดเว็บ ↗</a>
+  </div>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+  <div class="bg-slate-800 rounded-lg border border-slate-700 p-5">
+    <h2 class="text-sm font-semibold text-slate-300 mb-4">ข้อมูลโดเมน</h2>
+    {% if info %}
+    <dl class="space-y-2 text-sm">
+      {% for k, v in info.items() %}
+      <div class="flex">
+        <dt class="w-40 text-slate-400">{{ k }}</dt>
+        <dd class="flex-1 font-mono text-xs break-all">{{ v }}</dd>
+      </div>
+      {% endfor %}
+    </dl>
+    {% else %}
+    <p class="text-slate-500 text-sm">ไม่มีข้อมูล (ลอง: <code class="text-xs">plesk bin site --info {{ domain }}</code>)</p>
+    {% endif %}
+  </div>
+
+  <div class="bg-slate-800 rounded-lg border border-slate-700 p-5">
+    <h2 class="text-sm font-semibold text-slate-300 mb-4">เปลี่ยนชื่อโดเมน</h2>
+    <form method="post" action="/domains/{{ domain }}/rename" class="space-y-3" onsubmit="return confirm('ยืนยันเปลี่ยนชื่อโดเมน?')">
+      <input name="new_name" placeholder="ชื่อโดเมนใหม่ เช่น new.example.com" required class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm focus:outline-none focus:border-blue-500">
+      <button class="px-4 py-2 bg-amber-600 hover:bg-amber-500 rounded text-sm">เปลี่ยนชื่อ</button>
+    </form>
+
+    <h2 class="text-sm font-semibold text-slate-300 mt-6 mb-3">เปลี่ยน PHP version</h2>
+    <form method="post" action="/domains/{{ domain }}/php" class="flex gap-2">
+      <select name="handler" class="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm">
+        {% for h in php_handlers %}
+        <option value="{{ h.id }}">{{ h.id }}{% if h.version %} ({{ h.version }}){% endif %}</option>
+        {% endfor %}
+      </select>
+      <button class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm">บันทึก</button>
+    </form>
+
+    <h2 class="text-sm font-semibold text-slate-300 mt-6 mb-3">สำรองข้อมูล</h2>
+    <a href="/backup?domain={{ domain }}" class="inline-block px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded text-sm">ไปหน้า Backup</a>
+  </div>
+</div>
+{% endblock %}

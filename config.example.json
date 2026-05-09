@@ -1,0 +1,14 @@
+{
+  "host": "0.0.0.0",
+  "http_port": 9080,
+  "https_port": 9443,
+  "ssl_cert": "/etc/plesk-dashboard/cert.pem",
+  "ssl_key": "/etc/plesk-dashboard/key.pem",
+  "session_secret": "CHANGE_ME_TO_RANDOM_64_HEX_CHARS",
+  "vhosts_root": "/var/www/vhosts",
+  "backup_dir": "/root/backups",
+  "plesk_panel_url": "https://localhost:8443",
+  "users": {
+    "admin": "REPLACE_WITH_BCRYPT_HASH"
+  }
+}

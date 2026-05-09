@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}โดเมน · Plesk Dashboard{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <h1 class="text-2xl font-semibold">โดเมนทั้งหมด <span class="text-slate-500 text-base">({{ domains|length }})</span></h1>
+  <input id="filter" placeholder="ค้นหา..." oninput="filterRows()" class="px-3 py-2 bg-slate-800 border border-slate-700 rounded text-sm focus:outline-none focus:border-blue-500 w-64">
+</div>
+
+<div class="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
+  <table class="w-full text-sm">
+    <thead class="bg-slate-900/50 text-slate-400 text-xs uppercase tracking-wide">
+      <tr>
+        <th class="px-4 py-3 text-left">โดเมน</th>
+        <th class="px-4 py-3 text-right">การจัดการ</th>
+      </tr>
+    </thead>
+    <tbody id="rows">
+      {% for d in domains %}
+      <tr class="border-t border-slate-700/50 hover:bg-slate-700/30 row" data-name="{{ d.name|lower }}">
+        <td class="px-4 py-3 font-mono">{{ d.name }}</td>
+        <td class="px-4 py-3 text-right space-x-2">
+          <a href="/domains/{{ d.name }}" class="text-blue-400 hover:underline">รายละเอียด</a>
+          <a href="/ftp?domain={{ d.name }}" class="text-blue-400 hover:underline">FTP</a>
+          <a href="/files?path={{ d.name }}" class="text-blue-400 hover:underline">ไฟล์</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+function filterRows() {
+  const q = document.getElementById('filter').value.toLowerCase();
+  document.querySelectorAll('.row').forEach(r => {
+    r.style.display = r.dataset.name.includes(q) ? '' : 'none';
+  });
+}
+</script>
+{% endblock %}

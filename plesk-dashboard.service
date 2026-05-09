@@ -1,0 +1,15 @@
+[Unit]
+Description=Plesk Dashboard (custom UI)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/plesk-dashboard
+ExecStart=/usr/bin/python3 /opt/plesk-dashboard/server.py
+Restart=on-failure
+RestartSec=3
+Environment=PLESK_DASHBOARD_CONFIG=/etc/plesk-dashboard/config.json
+
+[Install]
+WantedBy=multi-user.target
