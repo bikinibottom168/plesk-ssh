@@ -49,17 +49,48 @@ fi
 
 # pkg names by distro
 if [ "$PKG_MGR" = "apt" ]; then
-  PKG_VENV=python3-venv
-  PKG_PIP=python3-pip
   PKG_MYSQLDUMP=mariadb-client
 else
-  PKG_VENV=python3
-  PKG_PIP=python3-pip
   PKG_MYSQLDUMP=mariadb
 fi
 
-check venv     pymod "$PKG_VENV"
-check ensurepip pymod "$PKG_PIP"
+# venv must be tested by actually creating one — `import venv` ผ่านได้
+# แม้ ensurepip data ขาด (เคส python3.X-venv ไม่ติดตั้งบน Debian)
+test_venv_works() {
+  local tmp
+  tmp=$(mktemp -d) || return 1
+  python3 -m venv "$tmp/t" >/dev/null 2>&1
+  local rc=$?
+  rm -rf "$tmp"
+  return $rc
+}
+
+if test_venv_works; then
+  echo "    ✓ python venv"
+else
+  PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+  echo "    ✗ python venv -> จะติดตั้ง python${PY_VER}-venv + python3-pip"
+  case "$PKG_MGR" in
+    apt)
+      apt-get update
+      apt-get install -y "python${PY_VER}-venv" python3-venv python3-pip 2>/dev/null \
+        || apt-get install -y python3-venv python3-pip
+      ;;
+    dnf) dnf install -y python3-pip ;;
+    yum) yum install -y python3-pip ;;
+    *)
+      echo "    โปรดติดตั้ง venv + pip เอง" >&2
+      exit 1
+      ;;
+  esac
+
+  if ! test_venv_works; then
+    echo "ERROR: venv ใช้งานไม่ได้แม้ติดตั้งแล้ว — ลองติดตั้ง python${PY_VER}-venv เอง" >&2
+    exit 1
+  fi
+  echo "    ✓ python venv (หลังติดตั้ง)"
+fi
+
 check openssl   cmd   openssl
 check rsync     cmd   rsync
 check mysqldump cmd   "$PKG_MYSQLDUMP"
@@ -90,6 +121,11 @@ echo "==> สร้าง directories"
 install -d -m 750 "$INSTALL_DIR" "$CONFIG_DIR"
 
 echo "==> สร้าง virtualenv ที่ $VENV_DIR"
+# ลบ venv เก่าที่ค้างไว้ (กรณี run ก่อนหน้าล้มกลางคัน)
+if [ -d "$VENV_DIR" ] && [ ! -x "$VENV_DIR/bin/python" ]; then
+  echo "    พบ venv เดิมเสีย — ลบทิ้ง"
+  rm -rf "$VENV_DIR"
+fi
 if [ ! -d "$VENV_DIR" ]; then
   python3 -m venv "$VENV_DIR"
 fi
