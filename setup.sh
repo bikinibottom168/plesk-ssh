@@ -121,13 +121,20 @@ echo "==> สร้าง directories"
 install -d -m 750 "$INSTALL_DIR" "$CONFIG_DIR"
 
 echo "==> สร้าง virtualenv ที่ $VENV_DIR"
-# ลบ venv เก่าที่ค้างไว้ (กรณี run ก่อนหน้าล้มกลางคัน)
-if [ -d "$VENV_DIR" ] && [ ! -x "$VENV_DIR/bin/python" ]; then
-  echo "    พบ venv เดิมเสีย — ลบทิ้ง"
-  rm -rf "$VENV_DIR"
+# ลบ venv ที่เสีย (ขาด python หรือ pip) จาก run ก่อนหน้าที่ล้มกลางคัน
+if [ -d "$VENV_DIR" ]; then
+  if [ ! -x "$VENV_DIR/bin/python" ] || [ ! -x "$VENV_DIR/bin/pip" ]; then
+    echo "    พบ venv เดิมเสีย (ขาด python/pip) — ลบทิ้ง"
+    rm -rf "$VENV_DIR"
+  fi
 fi
 if [ ! -d "$VENV_DIR" ]; then
   python3 -m venv "$VENV_DIR"
+fi
+# ตรวจหลังสร้างว่า pip ใช้งานได้จริง
+if [ ! -x "$VENV_DIR/bin/pip" ]; then
+  echo "ERROR: venv สร้างแล้วแต่ไม่มี pip — โปรดติดตั้ง python$(python3 -c 'import sys;print(f\"{sys.version_info.major}.{sys.version_info.minor}\")')-venv ให้ครบ" >&2
+  exit 1
 fi
 
 echo "==> ติดตั้ง Python deps ใน venv"
