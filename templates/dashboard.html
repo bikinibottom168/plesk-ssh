@@ -24,8 +24,8 @@
 <div class="bg-slate-800 rounded-lg border border-slate-700 p-5">
   <h2 class="text-sm font-semibold text-slate-300 mb-3">ลิงก์ด่วน</h2>
   <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-    <a href="{{ plesk_panel_url }}" target="_blank" class="text-blue-400 hover:underline">Plesk Panel ↗</a>
-    <a href="{{ plesk_panel_url }}/phpmyadmin/" target="_blank" class="text-blue-400 hover:underline">phpMyAdmin ↗</a>
+    <a href="{{ panel_url(request) }}" target="_blank" class="text-blue-400 hover:underline">Plesk Panel ↗</a>
+    <a href="{{ panel_url(request) }}/phpmyadmin/" target="_blank" class="text-blue-400 hover:underline">phpMyAdmin ↗</a>
     <a href="/databases" class="text-blue-400 hover:underline">รายการฐานข้อมูล</a>
     <a href="/domains" class="text-blue-400 hover:underline">รายการโดเมน</a>
   </div>

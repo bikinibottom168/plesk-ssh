@@ -3,7 +3,7 @@
 {% block content %}
 <div class="flex items-center justify-between mb-6">
   <h1 class="text-2xl font-semibold">ฐานข้อมูล <span class="text-slate-500 text-base">({{ databases|length }})</span></h1>
-  <a href="{{ plesk_panel_url }}/phpmyadmin/" target="_blank" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm">เปิด phpMyAdmin ↗</a>
+  <a href="{{ panel_url(request) }}/phpmyadmin/" target="_blank" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm">เปิด phpMyAdmin ↗</a>
 </div>
 
 {% if error %}
@@ -27,7 +27,7 @@
         <td class="px-4 py-3 text-xs text-slate-400">{{ db.type }}</td>
         <td class="px-4 py-3 font-mono text-xs">{{ db.domain }}</td>
         <td class="px-4 py-3 text-right space-x-2">
-          <a href="{{ plesk_panel_url }}/phpmyadmin/" target="_blank" class="text-blue-400 hover:underline">phpMyAdmin ↗</a>
+          <a href="{{ panel_url(request) }}/phpmyadmin/" target="_blank" class="text-blue-400 hover:underline">phpMyAdmin ↗</a>
           <a href="/backup?domain={{ db.domain }}#db" class="text-blue-400 hover:underline">backup</a>
         </td>
       </tr>

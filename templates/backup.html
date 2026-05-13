@@ -7,7 +7,8 @@
   <div class="bg-slate-800 rounded-lg border border-slate-700 p-5">
     <h2 class="text-sm font-semibold text-slate-300 mb-1">Subscription (Plesk backup)</h2>
     <p class="text-xs text-slate-500 mb-3">backup ทั้ง subscription ผ่าน pleskbackup</p>
-    <form hx-post="/backup/subscription" hx-target="#output" hx-swap="innerHTML" class="space-y-3">
+    <form onsubmit="return runBackup(event, this, '/backup/subscription')" class="space-y-3">
+      <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
       <select name="domain" required class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm">
         <option value="">เลือกโดเมน...</option>
         {% for d in domains %}<option value="{{ d.name }}" {% if d.name == selected_domain %}selected{% endif %}>{{ d.name }}</option>{% endfor %}
@@ -20,7 +21,8 @@
   <div class="bg-slate-800 rounded-lg border border-slate-700 p-5">
     <h2 class="text-sm font-semibold text-slate-300 mb-1">Files (tar.gz)</h2>
     <p class="text-xs text-slate-500 mb-3">backup เฉพาะไฟล์เว็บ (httpdocs)</p>
-    <form hx-post="/backup/files" hx-target="#output" hx-swap="innerHTML" class="space-y-3">
+    <form onsubmit="return runBackup(event, this, '/backup/files')" class="space-y-3">
+      <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
       <select name="domain" required class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm">
         <option value="">เลือกโดเมน...</option>
         {% for d in domains %}<option value="{{ d.name }}">{{ d.name }}</option>{% endfor %}
@@ -33,7 +35,8 @@
   <div class="bg-slate-800 rounded-lg border border-slate-700 p-5">
     <h2 class="text-sm font-semibold text-slate-300 mb-1">Database (mysqldump)</h2>
     <p class="text-xs text-slate-500 mb-3">backup ฐานข้อมูล MySQL/MariaDB</p>
-    <form hx-post="/backup/db" hx-target="#output" hx-swap="innerHTML" class="space-y-2">
+    <form onsubmit="return runBackup(event, this, '/backup/db')" class="space-y-2">
+      <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
       <input name="db_name" placeholder="ชื่อฐานข้อมูล" required class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm">
       <input name="db_user" placeholder="DB user" required class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm">
       <input name="db_pass" placeholder="DB password" type="password" required class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm">
@@ -45,8 +48,52 @@
 </div>
 
 <div class="bg-slate-800 rounded-lg border border-slate-700 p-5">
-  <h2 class="text-sm font-semibold text-slate-300 mb-3">ผลลัพธ์</h2>
-  <pre id="output" class="text-xs bg-slate-950 p-4 rounded border border-slate-700 max-h-96 overflow-auto whitespace-pre-wrap">รออินพุต...</pre>
+  <div class="flex items-center justify-between mb-3">
+    <h2 class="text-sm font-semibold text-slate-300">ผลลัพธ์ (live)</h2>
+    <span id="output-status" class="text-xs text-slate-500"></span>
+  </div>
+  <pre id="output" class="text-xs bg-slate-950 p-4 rounded border border-slate-700 max-h-[28rem] overflow-auto whitespace-pre-wrap">รออินพุต...</pre>
   <p class="text-xs text-slate-500 mt-2">ไฟล์ปลายทาง: <code>{{ backup_dir }}</code></p>
 </div>
+
+<script>
+async function runBackup(event, form, url) {
+  event.preventDefault();
+  const data = new FormData(form);
+  const output = document.getElementById('output');
+  const status = document.getElementById('output-status');
+  const button = form.querySelector('button');
+
+  output.textContent = '';
+  status.textContent = 'กำลังประมวลผล...';
+  button.disabled = true;
+  button.classList.add('opacity-50');
+
+  try {
+    const res = await fetch(url, {method: 'POST', body: data});
+    if (!res.ok) {
+      const text = await res.text();
+      output.textContent = `Error ${res.status}\n${text}`;
+      status.textContent = 'ผิดพลาด';
+      return false;
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      output.textContent += decoder.decode(value, {stream: true});
+      output.scrollTop = output.scrollHeight;
+    }
+    status.textContent = 'เสร็จ';
+  } catch (e) {
+    output.textContent += `\nError: ${e.message}`;
+    status.textContent = 'ผิดพลาด';
+  } finally {
+    button.disabled = false;
+    button.classList.remove('opacity-50');
+  }
+  return false;
+}
+</script>
 {% endblock %}

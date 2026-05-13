@@ -33,12 +33,15 @@
   <div class="bg-slate-800 rounded-lg border border-slate-700 p-5">
     <h2 class="text-sm font-semibold text-slate-300 mb-4">เปลี่ยนชื่อโดเมน</h2>
     <form method="post" action="/domains/{{ domain }}/rename" class="space-y-3" onsubmit="return confirm('ยืนยันเปลี่ยนชื่อโดเมน?')">
+      <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
       <input name="new_name" placeholder="ชื่อโดเมนใหม่ เช่น new.example.com" required class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm focus:outline-none focus:border-blue-500">
       <button class="px-4 py-2 bg-amber-600 hover:bg-amber-500 rounded text-sm">เปลี่ยนชื่อ</button>
     </form>
 
     <h2 class="text-sm font-semibold text-slate-300 mt-6 mb-3">เปลี่ยน PHP version</h2>
+    {% if php_handlers %}
     <form method="post" action="/domains/{{ domain }}/php" class="flex gap-2">
+      <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
       <select name="handler" class="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm">
         {% for h in php_handlers %}
         <option value="{{ h.id }}">{{ h.id }}{% if h.version %} ({{ h.version }}){% endif %}</option>
@@ -46,6 +49,9 @@
       </select>
       <button class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm">บันทึก</button>
     </form>
+    {% else %}
+    <p class="text-xs text-slate-500">โหลดรายชื่อ PHP handler ไม่สำเร็จ (รัน <code>plesk bin php_handler --list</code> เพื่อตรวจสอบ)</p>
+    {% endif %}
 
     <h2 class="text-sm font-semibold text-slate-300 mt-6 mb-3">สำรองข้อมูล</h2>
     <a href="/backup?domain={{ domain }}" class="inline-block px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded text-sm">ไปหน้า Backup</a>

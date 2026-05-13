@@ -3,11 +3,22 @@
 {% block content %}
 <div class="flex items-center justify-between mb-6">
   <h1 class="text-2xl font-semibold">จัดการไฟล์</h1>
-  <form method="post" action="/files/upload" enctype="multipart/form-data" class="flex items-center gap-2">
-    <input type="hidden" name="path" value="{{ current_path }}">
-    <input type="file" name="file" required class="text-xs text-slate-400">
-    <button class="px-3 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm">อัปโหลด</button>
-  </form>
+  <div class="flex items-center gap-2">
+    {% if not is_file %}
+    <form method="post" action="/files/mkdir" class="flex items-center gap-2">
+      <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+      <input type="hidden" name="path" value="{{ current_path }}">
+      <input name="name" placeholder="ชื่อโฟลเดอร์ใหม่" required class="px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm">
+      <button class="px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded text-sm">สร้างโฟลเดอร์</button>
+    </form>
+    <form method="post" action="/files/upload" enctype="multipart/form-data" class="flex items-center gap-2">
+      <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+      <input type="hidden" name="path" value="{{ current_path }}">
+      <input type="file" name="file" required class="text-xs text-slate-400">
+      <button class="px-3 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm">อัปโหลด</button>
+    </form>
+    {% endif %}
+  </div>
 </div>
 
 <nav class="flex items-center gap-2 text-sm mb-4 flex-wrap bg-slate-800 px-4 py-3 rounded-lg border border-slate-700">
@@ -23,11 +34,13 @@
 
 {% if is_file %}
 <form method="post" action="/files/save" class="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
+  <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
   <input type="hidden" name="path" value="{{ current_path }}">
   <div class="px-4 py-2 border-b border-slate-700 flex items-center justify-between">
     <span class="text-sm font-mono">{{ current_path }}</span>
     <div class="space-x-2">
       <a href="/files/download?path={{ current_path }}" class="text-xs text-blue-400 hover:underline">ดาวน์โหลด</a>
+      <button type="button" onclick="renameItem('{{ current_path }}')" class="text-xs text-amber-400 hover:underline">เปลี่ยนชื่อ</button>
       <button class="text-xs px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded">บันทึก</button>
     </div>
   </div>
@@ -63,9 +76,12 @@
         </td>
         <td class="px-4 py-3 text-right text-xs text-slate-400">{% if not item.is_dir %}{{ item.size_human }}{% endif %}</td>
         <td class="px-4 py-3 text-right text-xs text-slate-400">{{ item.modified_human }}</td>
-        <td class="px-4 py-3 text-right">
-          <form method="post" action="/files/delete" class="inline" onsubmit="return confirm('ยืนยันลบ {{ item.name }}?')">
-            <input type="hidden" name="path" value="{{ current_path.strip('/') }}/{{ item.name }}">
+        <td class="px-4 py-3 text-right space-x-3">
+          <button type="button" onclick="renameItem('{{ (current_path.strip('/') + '/' + item.name).lstrip('/') }}')" class="text-xs text-amber-400 hover:underline">เปลี่ยนชื่อ</button>
+          <form method="post" action="/files/delete" class="inline" onsubmit="return confirmDelete(this, '{{ item.name }}', {{ 'true' if item.is_dir else 'false' }})">
+            <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+            <input type="hidden" name="path" value="{{ (current_path.strip('/') + '/' + item.name).lstrip('/') }}">
+            <input type="hidden" name="recursive" value="0" class="recursive-flag">
             <button class="text-xs text-rose-400 hover:underline">ลบ</button>
           </form>
         </td>
@@ -75,4 +91,30 @@
   </table>
 </div>
 {% endif %}
+
+<form id="rename-form" method="post" action="/files/rename" style="display:none">
+  <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+  <input type="hidden" name="path" id="rename-path">
+  <input type="hidden" name="new_name" id="rename-new">
+</form>
+
+<script>
+function renameItem(path) {
+  const cur = path.split('/').pop();
+  const next = prompt('เปลี่ยนชื่อเป็น:', cur);
+  if (!next || next === cur) return;
+  document.getElementById('rename-path').value = path;
+  document.getElementById('rename-new').value = next;
+  document.getElementById('rename-form').submit();
+}
+
+function confirmDelete(form, name, isDir) {
+  if (isDir) {
+    const recursive = confirm(`ลบโฟลเดอร์ "${name}" ?\n\nกด OK = ลบทั้งหมดในนั้นด้วย (recursive)\nกด Cancel = ลบเฉพาะถ้าว่าง`);
+    form.querySelector('.recursive-flag').value = recursive ? '1' : '0';
+    return confirm(`ยืนยันลบ "${name}" ${recursive ? '(แบบ recursive)' : '(เฉพาะถ้าว่าง)'}?`);
+  }
+  return confirm(`ยืนยันลบ "${name}"?`);
+}
+</script>
 {% endblock %}

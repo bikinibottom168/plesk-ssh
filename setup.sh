@@ -119,6 +119,7 @@ fi
 # ---------- venv + Python deps ----------
 echo "==> สร้าง directories"
 install -d -m 750 "$INSTALL_DIR" "$CONFIG_DIR"
+install -d -m 750 /var/log/plesk-dashboard
 
 echo "==> สร้าง virtualenv ที่ $VENV_DIR"
 # ลบ venv ที่เสีย (ขาด python หรือ pip) จาก run ก่อนหน้าที่ล้มกลางคัน

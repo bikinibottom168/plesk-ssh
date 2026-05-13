@@ -334,8 +334,9 @@ def cmd_view_ftp(args):
         sql = (
             "SELECT IFNULL(d.name, '-'), s.login, a.password, a.type "
             "FROM sys_users s "
-            "JOIN accounts a ON s.account_id = a.id "
-            "LEFT JOIN domains d ON d.sys_user_id = s.id "
+            "JOIN accounts a ON a.id = s.account_id "
+            "LEFT JOIN hosting h ON h.sys_user_id = s.id "
+            "LEFT JOIN domains d ON d.id = h.dom_id "
             "ORDER BY d.name, s.login;"
         )
     elif args.user:
@@ -343,8 +344,9 @@ def cmd_view_ftp(args):
         sql = (
             "SELECT IFNULL(d.name, '-'), s.login, a.password, a.type "
             "FROM sys_users s "
-            "JOIN accounts a ON s.account_id = a.id "
-            "LEFT JOIN domains d ON d.sys_user_id = s.id "
+            "JOIN accounts a ON a.id = s.account_id "
+            "LEFT JOIN hosting h ON h.sys_user_id = s.id "
+            "LEFT JOIN domains d ON d.id = h.dom_id "
             f"WHERE s.login = '{user}';"
         )
     elif args.domain:
@@ -352,8 +354,9 @@ def cmd_view_ftp(args):
         sql = (
             "SELECT d.name, s.login, a.password, a.type "
             "FROM domains d "
-            "JOIN sys_users s ON d.sys_user_id = s.id "
-            "JOIN accounts a ON s.account_id = a.id "
+            "JOIN hosting h ON h.dom_id = d.id "
+            "JOIN sys_users s ON s.id = h.sys_user_id "
+            "JOIN accounts a ON a.id = s.account_id "
             f"WHERE d.name = '{domain}';"
         )
     else:

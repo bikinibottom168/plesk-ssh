@@ -7,7 +7,9 @@
   "session_secret": "CHANGE_ME_TO_RANDOM_64_HEX_CHARS",
   "vhosts_root": "/var/www/vhosts",
   "backup_dir": "/root/backups",
-  "plesk_panel_url": "https://localhost:8443",
+  "max_upload_mb": 200,
+  "audit_log": "/var/log/plesk-dashboard/audit.log",
+  "plesk_panel_url": "",
   "users": {
     "admin": "REPLACE_WITH_BCRYPT_HASH"
   }

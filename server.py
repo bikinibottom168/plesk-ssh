@@ -5,8 +5,11 @@ Reuses logic from admin.py but exposes operations through a small FastAPI app.
 Designed to coexist with Plesk panel (default ports 9080/9443).
 """
 import argparse
+import asyncio
 import json
+import logging
 import os
+import secrets
 import shlex
 import subprocess
 import sys
@@ -16,10 +19,10 @@ from typing import Optional, List, Dict
 
 import bcrypt
 import uvicorn
-from fastapi import FastAPI, Request, Form, HTTPException, UploadFile, File
+from fastapi import FastAPI, Request, Form, HTTPException, UploadFile, File, Depends
 from fastapi.responses import (
     HTMLResponse, RedirectResponse, FileResponse,
-    PlainTextResponse, JSONResponse,
+    PlainTextResponse, JSONResponse, StreamingResponse,
 )
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -49,12 +52,68 @@ VHOSTS_ROOT = CONFIG.get("vhosts_root", "/var/www/vhosts")
 BACKUP_DIR = CONFIG.get("backup_dir", "/root/backups")
 PLESK_PANEL_URL = CONFIG.get("plesk_panel_url", "https://localhost:8443")
 USERS = CONFIG.get("users", {})
+MAX_UPLOAD_MB = int(CONFIG.get("max_upload_mb", 200))
+AUDIT_LOG = CONFIG.get("audit_log", "/var/log/plesk-dashboard/audit.log")
+
+
+# ---------- audit logging ----------
+audit_logger = logging.getLogger("plesk_dashboard.audit")
+audit_logger.setLevel(logging.INFO)
+try:
+    Path(AUDIT_LOG).parent.mkdir(parents=True, exist_ok=True)
+    _handler = logging.FileHandler(AUDIT_LOG)
+    _handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+    ))
+    audit_logger.addHandler(_handler)
+except OSError as e:
+    print(f"WARNING: เปิด audit log ไม่ได้ ({e}) — log จะไปที่ stderr", file=sys.stderr)
+    audit_logger.addHandler(logging.StreamHandler(sys.stderr))
+
+
+def audit(request: Request, action: str, **details):
+    user = request.session.get("user", "?") if hasattr(request, "session") else "?"
+    ip = request.client.host if request.client else "?"
+    extras = " ".join(f"{k}={v}" for k, v in details.items())
+    audit_logger.info(f"user={user} ip={ip} action={action} {extras}".strip())
 
 
 app = FastAPI(title="Plesk Dashboard", docs_url=None, redoc_url=None)
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, https_only=False)
 templates = Jinja2Templates(directory=str(ROOT / "templates"))
-templates.env.globals["plesk_panel_url"] = PLESK_PANEL_URL
+
+
+def panel_url(request: Request) -> str:
+    """Return Plesk panel base URL.
+
+    Prefer explicit config value (if not the localhost default), otherwise
+    derive from the request's host so links work when accessed remotely.
+    """
+    if PLESK_PANEL_URL and "localhost" not in PLESK_PANEL_URL \
+            and "127.0.0.1" not in PLESK_PANEL_URL:
+        return PLESK_PANEL_URL.rstrip("/")
+    host = request.url.hostname or "localhost"
+    return f"https://{host}:8443"
+
+
+templates.env.globals["panel_url"] = panel_url
+
+
+# ---------- CSRF ----------
+
+def csrf_token(request: Request) -> str:
+    if "csrf" not in request.session:
+        request.session["csrf"] = secrets.token_hex(32)
+    return request.session["csrf"]
+
+
+async def require_csrf(request: Request, csrf: str = Form(...)):
+    expected = request.session.get("csrf", "")
+    if not expected or not secrets.compare_digest(expected, csrf):
+        raise HTTPException(403, "Invalid CSRF token — โปรด refresh หน้าและลองใหม่")
+
+
+templates.env.globals["csrf_token"] = csrf_token
 
 
 # ---------- helpers ----------
@@ -147,13 +206,38 @@ def get_domain_info(domain: str) -> Dict[str, str]:
 
 
 def list_php_handlers() -> List[Dict]:
+    """Parse `plesk bin php_handler --list` output.
+
+    Format varies across versions — we accept tab- or whitespace-separated rows,
+    skip header/separator lines, and extract id + any version-like token.
+    """
     proc = run_cmd(["plesk", "bin", "php_handler", "--list"])
+    if proc.returncode != 0:
+        return []
     handlers = []
-    for line in proc.stdout.splitlines()[1:]:
-        parts = line.split()
+    seen = set()
+    for line in proc.stdout.splitlines():
+        line = line.rstrip()
+        s = line.strip()
+        if not s or s.startswith(("-", "=")):
+            continue
+        parts = line.split("\t") if "\t" in line else line.split()
+        parts = [p.strip() for p in parts if p.strip()]
         if not parts:
             continue
-        handlers.append({"id": parts[0], "version": parts[2] if len(parts) > 2 else ""})
+        first = parts[0].lower()
+        if first in ("id", "handler", "name", "type", "php_handler_id"):
+            continue
+        handler_id = parts[0]
+        if handler_id in seen:
+            continue
+        seen.add(handler_id)
+        version = ""
+        for p in parts[1:]:
+            if any(c.isdigit() for c in p) and "." in p and len(p) < 10:
+                version = p
+                break
+        handlers.append({"id": handler_id, "version": version})
     return handlers
 
 
@@ -181,8 +265,9 @@ def get_ftp_passwords(domain: Optional[str], user: Optional[str], all_users: boo
         sql = (
             "SELECT IFNULL(d.name, '-'), s.login, a.password, a.type "
             "FROM sys_users s "
-            "JOIN accounts a ON s.account_id = a.id "
-            "LEFT JOIN domains d ON d.sys_user_id = s.id "
+            "JOIN accounts a ON a.id = s.account_id "
+            "LEFT JOIN hosting h ON h.sys_user_id = s.id "
+            "LEFT JOIN domains d ON d.id = h.dom_id "
             "ORDER BY d.name, s.login;"
         )
     elif user:
@@ -190,8 +275,9 @@ def get_ftp_passwords(domain: Optional[str], user: Optional[str], all_users: boo
         sql = (
             "SELECT IFNULL(d.name, '-'), s.login, a.password, a.type "
             "FROM sys_users s "
-            "JOIN accounts a ON s.account_id = a.id "
-            "LEFT JOIN domains d ON d.sys_user_id = s.id "
+            "JOIN accounts a ON a.id = s.account_id "
+            "LEFT JOIN hosting h ON h.sys_user_id = s.id "
+            "LEFT JOIN domains d ON d.id = h.dom_id "
             f"WHERE s.login = '{u}';"
         )
     elif domain:
@@ -199,8 +285,9 @@ def get_ftp_passwords(domain: Optional[str], user: Optional[str], all_users: boo
         sql = (
             "SELECT d.name, s.login, a.password, a.type "
             "FROM domains d "
-            "JOIN sys_users s ON d.sys_user_id = s.id "
-            "JOIN accounts a ON s.account_id = a.id "
+            "JOIN hosting h ON h.dom_id = d.id "
+            "JOIN sys_users s ON s.id = h.sys_user_id "
+            "JOIN accounts a ON a.id = s.account_id "
             f"WHERE d.name = '{d}';"
         )
     else:
@@ -251,6 +338,7 @@ async def login(request: Request, username: str = Form(...), password: str = For
         except ValueError:
             ok = False
     if not ok:
+        audit(request, "login_failed", username=username)
         return templates.TemplateResponse(
             request,
             "login.html",
@@ -258,11 +346,14 @@ async def login(request: Request, username: str = Form(...), password: str = For
             status_code=401,
         )
     request.session["user"] = username
+    request.session["csrf"] = secrets.token_hex(32)
+    audit(request, "login_ok", username=username)
     return RedirectResponse("/", status_code=303)
 
 
 @app.get("/logout")
 async def logout(request: Request):
+    audit(request, "logout")
     request.session.clear()
     return RedirectResponse("/login", status_code=303)
 
@@ -305,25 +396,34 @@ async def domain_detail(name: str, request: Request):
     })
 
 
-@app.post("/domains/{name}/rename")
+@app.post("/domains/{name}/rename", dependencies=[Depends(require_csrf)])
 async def domain_rename(name: str, request: Request, new_name: str = Form(...)):
     if not is_authed(request):
         raise HTTPException(401)
     safe_sql_value(new_name)
+    # Try subscription rename first (works for subscription main domain)
     proc = run_cmd(["plesk", "bin", "subscription", "-u", name, "-new_name", new_name])
     if proc.returncode != 0:
-        return PlainTextResponse(proc.stderr or proc.stdout, status_code=400)
+        # Fallback for addon/non-subscription domains
+        proc2 = run_cmd(["plesk", "bin", "site", "--update", name, "-name", new_name])
+        if proc2.returncode != 0:
+            audit(request, "domain_rename_failed", domain=name, new=new_name)
+            err = (proc.stderr or proc.stdout) + "\n\nfallback site --update:\n" + (proc2.stderr or proc2.stdout)
+            return PlainTextResponse(err, status_code=400)
+    audit(request, "domain_rename", domain=name, new=new_name)
     return RedirectResponse(f"/domains/{new_name}", status_code=303)
 
 
-@app.post("/domains/{name}/php")
+@app.post("/domains/{name}/php", dependencies=[Depends(require_csrf)])
 async def domain_set_php(name: str, request: Request, handler: str = Form(...)):
     if not is_authed(request):
         raise HTTPException(401)
     safe_sql_value(handler)
     proc = run_cmd(["plesk", "bin", "site", "--update", name, "-php_handler_id", handler])
     if proc.returncode != 0:
+        audit(request, "php_change_failed", domain=name, handler=handler)
         return PlainTextResponse(proc.stderr or proc.stdout, status_code=400)
+    audit(request, "php_change", domain=name, handler=handler)
     return RedirectResponse(f"/domains/{name}", status_code=303)
 
 
@@ -362,7 +462,36 @@ async def backup_page(request: Request, domain: Optional[str] = None):
     })
 
 
-@app.post("/backup/subscription", response_class=PlainTextResponse)
+async def stream_process(cmd: List[str], success_msg: str = "", env: Optional[Dict] = None):
+    """Run a subprocess and stream combined stdout+stderr line-by-line.
+
+    Yields bytes so caller can wrap in StreamingResponse.
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            env=env,
+        )
+    except Exception as e:
+        yield f"start failed: {e}\n".encode()
+        return
+
+    try:
+        while True:
+            line = await proc.stdout.readline()
+            if not line:
+                break
+            yield line
+    finally:
+        rc = await proc.wait()
+        yield f"\n=== exit {rc} ===\n".encode()
+        if rc == 0 and success_msg:
+            yield f"OK: {success_msg}\n".encode()
+
+
+@app.post("/backup/subscription", dependencies=[Depends(require_csrf)])
 async def backup_subscription(request: Request,
                               domain: str = Form(...),
                               incremental: int = Form(0)):
@@ -374,15 +503,11 @@ async def backup_subscription(request: Request,
     cmd = ["plesk", "bin", "pleskbackup", "--domains-name", domain, "-output-file", out]
     if incremental:
         cmd.append("-incremental")
-    proc = run_cmd(cmd, timeout=3600)
-    body = (proc.stdout or "") + (proc.stderr or "")
-    body += f"\n=== exit {proc.returncode} ===\n"
-    if proc.returncode == 0:
-        body += f"OK: {out}"
-    return body
+    audit(request, "backup_subscription", domain=domain, output=out)
+    return StreamingResponse(stream_process(cmd, success_msg=out), media_type="text/plain")
 
 
-@app.post("/backup/files", response_class=PlainTextResponse)
+@app.post("/backup/files", dependencies=[Depends(require_csrf)])
 async def backup_files(request: Request,
                        domain: str = Form(...),
                        exclude: str = Form("")):
@@ -394,19 +519,15 @@ async def backup_files(request: Request,
     if not src.is_dir():
         raise HTTPException(404, f"source not found: {src}")
     out = f"{BACKUP_DIR}/{domain}_files_{now_ts()}.tar.gz"
-    cmd = ["tar", "-czf", out]
+    cmd = ["tar", "-czvf", out]
     for ex in [x.strip() for x in exclude.split(",") if x.strip()]:
         cmd.extend(["--exclude", ex])
     cmd.extend(["-C", str(src), "."])
-    proc = run_cmd(cmd, timeout=3600)
-    body = (proc.stdout or "") + (proc.stderr or "")
-    body += f"\n=== exit {proc.returncode} ===\n"
-    if proc.returncode == 0:
-        body += f"OK: {out}"
-    return body
+    audit(request, "backup_files", domain=domain, output=out)
+    return StreamingResponse(stream_process(cmd, success_msg=out), media_type="text/plain")
 
 
-@app.post("/backup/db", response_class=PlainTextResponse)
+@app.post("/backup/db", dependencies=[Depends(require_csrf)])
 async def backup_db(request: Request,
                     db_name: str = Form(...),
                     db_user: str = Form(...),
@@ -419,26 +540,49 @@ async def backup_db(request: Request,
     out = f"{BACKUP_DIR}/{db_name}_db_{now_ts()}.sql"
     if gzip:
         out += ".gz"
-    cmd = ["mysqldump", f"--host={host}", f"--user={db_user}",
-           "--single-transaction", "--quick", "--routines", "--triggers",
-           "--default-character-set=utf8mb4", db_name]
     env = os.environ.copy()
     env["MYSQL_PWD"] = db_pass
-    try:
-        if gzip:
-            shell_cmd = f"{shlex.join(cmd)} | gzip > {shlex.quote(out)}"
-            proc = subprocess.run(shell_cmd, shell=True, env=env,
-                                  capture_output=True, text=True, timeout=3600)
-        else:
-            with open(out, "w") as f:
-                proc = subprocess.run(cmd, env=env, stdout=f,
-                                      stderr=subprocess.PIPE, text=True, timeout=3600)
-    except subprocess.TimeoutExpired:
-        return PlainTextResponse("timeout", status_code=500)
-    body = (proc.stderr or "") + f"\n=== exit {proc.returncode} ===\n"
-    if proc.returncode == 0:
-        body += f"OK: {out}"
-    return body
+    audit(request, "backup_db", db=db_name, host=host, output=out)
+
+    async def stream_db():
+        cmd = ["mysqldump", f"--host={host}", f"--user={db_user}",
+               "--single-transaction", "--quick", "--routines", "--triggers",
+               "--default-character-set=utf8mb4", db_name]
+        try:
+            if gzip:
+                shell_cmd = f"{shlex.join(cmd)} | gzip > {shlex.quote(out)}"
+                proc = await asyncio.create_subprocess_shell(
+                    shell_cmd, env=env,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+            else:
+                f = open(out, "wb")
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd, env=env,
+                    stdout=f,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+        except Exception as e:
+            yield f"start failed: {e}\n".encode()
+            return
+
+        try:
+            stream_source = proc.stdout if gzip else proc.stderr
+            while stream_source:
+                line = await stream_source.readline()
+                if not line:
+                    break
+                yield line
+        finally:
+            rc = await proc.wait()
+            if not gzip:
+                f.close()
+            yield f"\n=== exit {rc} ===\n".encode()
+            if rc == 0:
+                yield f"OK: {out}\n".encode()
+
+    return StreamingResponse(stream_db(), media_type="text/plain")
 
 
 # ---------- routes: files ----------
@@ -495,7 +639,7 @@ async def files_page(request: Request, path: str = ""):
     })
 
 
-@app.post("/files/save")
+@app.post("/files/save", dependencies=[Depends(require_csrf)])
 async def files_save(request: Request, path: str = Form(...), content: str = Form("")):
     if not is_authed(request):
         raise HTTPException(401)
@@ -503,11 +647,14 @@ async def files_save(request: Request, path: str = Form(...), content: str = For
     if not full.is_file():
         raise HTTPException(404)
     full.write_text(content, encoding="utf-8")
+    audit(request, "file_save", path=path, size=len(content))
     return RedirectResponse(f"/files?path={path}", status_code=303)
 
 
-@app.post("/files/delete")
-async def files_delete(request: Request, path: str = Form(...)):
+@app.post("/files/delete", dependencies=[Depends(require_csrf)])
+async def files_delete(request: Request,
+                       path: str = Form(...),
+                       recursive: int = Form(0)):
     if not is_authed(request):
         raise HTTPException(401)
     full = safe_join(VHOSTS_ROOT, path)
@@ -516,18 +663,27 @@ async def files_delete(request: Request, path: str = Form(...)):
     if full == Path(VHOSTS_ROOT).resolve():
         raise HTTPException(400, "cannot delete root")
     if full.is_dir():
-        # Refuse to recursively delete; only empty dirs
-        try:
-            full.rmdir()
-        except OSError as e:
-            return PlainTextResponse(f"ลบโฟลเดอร์ไม่ได้: {e} (ต้องว่างก่อน)", status_code=400)
+        if recursive:
+            import shutil
+            shutil.rmtree(full)
+            audit(request, "dir_delete_recursive", path=path)
+        else:
+            try:
+                full.rmdir()
+                audit(request, "dir_delete", path=path)
+            except OSError as e:
+                return PlainTextResponse(
+                    f"ลบโฟลเดอร์ไม่ได้: {e} (ติ๊ก recursive เพื่อลบทั้งหมด)",
+                    status_code=400,
+                )
     else:
         full.unlink()
+        audit(request, "file_delete", path=path)
     parent = "/".join(path.strip("/").split("/")[:-1])
     return RedirectResponse(f"/files?path={parent}", status_code=303)
 
 
-@app.post("/files/upload")
+@app.post("/files/upload", dependencies=[Depends(require_csrf)])
 async def files_upload(request: Request,
                        path: str = Form(""),
                        file: UploadFile = File(...)):
@@ -537,10 +693,63 @@ async def files_upload(request: Request,
     if not target_dir.is_dir():
         raise HTTPException(400, "target is not a directory")
     target = target_dir / Path(file.filename).name
-    with target.open("wb") as f:
-        while chunk := await file.read(1024 * 1024):
-            f.write(chunk)
+    max_bytes = MAX_UPLOAD_MB * 1024 * 1024
+    size = 0
+    try:
+        with target.open("wb") as f:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > max_bytes:
+                    f.close()
+                    target.unlink(missing_ok=True)
+                    raise HTTPException(
+                        413,
+                        f"ไฟล์ใหญ่เกิน {MAX_UPLOAD_MB} MB",
+                    )
+                f.write(chunk)
+    except HTTPException:
+        raise
+    except Exception as e:
+        target.unlink(missing_ok=True)
+        raise HTTPException(500, f"upload failed: {e}")
+    audit(request, "file_upload", path=path, name=file.filename, size=size)
     return RedirectResponse(f"/files?path={path}", status_code=303)
+
+
+@app.post("/files/mkdir", dependencies=[Depends(require_csrf)])
+async def files_mkdir(request: Request, path: str = Form(""), name: str = Form(...)):
+    if not is_authed(request):
+        raise HTTPException(401)
+    # Disallow path separators in name to keep mkdir local
+    if "/" in name or "\\" in name or name in (".", ".."):
+        raise HTTPException(400, "ชื่อโฟลเดอร์ไม่ถูกต้อง")
+    parent = safe_join(VHOSTS_ROOT, path)
+    if not parent.is_dir():
+        raise HTTPException(400, "parent is not a directory")
+    new_dir = parent / name
+    if new_dir.exists():
+        raise HTTPException(409, "มีอยู่แล้ว")
+    new_dir.mkdir(parents=False)
+    audit(request, "mkdir", path=path, name=name)
+    return RedirectResponse(f"/files?path={path}", status_code=303)
+
+
+@app.post("/files/rename", dependencies=[Depends(require_csrf)])
+async def files_rename(request: Request, path: str = Form(...), new_name: str = Form(...)):
+    if not is_authed(request):
+        raise HTTPException(401)
+    if "/" in new_name or "\\" in new_name or new_name in (".", ".."):
+        raise HTTPException(400, "ชื่อใหม่ไม่ถูกต้อง")
+    full = safe_join(VHOSTS_ROOT, path)
+    if not full.exists():
+        raise HTTPException(404)
+    target = full.parent / new_name
+    if target.exists():
+        raise HTTPException(409, "ปลายทางมีอยู่แล้ว")
+    full.rename(target)
+    audit(request, "rename", old=path, new=str(target.relative_to(VHOSTS_ROOT)))
+    parent = "/".join(path.strip("/").split("/")[:-1])
+    return RedirectResponse(f"/files?path={parent}", status_code=303)
 
 
 @app.get("/files/download")
