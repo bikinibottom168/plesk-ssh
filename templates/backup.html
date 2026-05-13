@@ -47,7 +47,7 @@
   </div>
 </div>
 
-<div class="bg-slate-800 rounded-lg border border-slate-700 p-5">
+<div class="bg-slate-800 rounded-lg border border-slate-700 p-5 mb-6">
   <div class="flex items-center justify-between mb-3">
     <h2 class="text-sm font-semibold text-slate-300">ผลลัพธ์ (live)</h2>
     <span id="output-status" class="text-xs text-slate-500"></span>
@@ -55,6 +55,85 @@
   <pre id="output" class="text-xs bg-slate-950 p-4 rounded border border-slate-700 max-h-[28rem] overflow-auto whitespace-pre-wrap">รออินพุต...</pre>
   <p class="text-xs text-slate-500 mt-2">ไฟล์ปลายทาง: <code>{{ backup_dir }}</code></p>
 </div>
+
+<div class="bg-slate-800 rounded-lg border border-slate-700 p-5">
+  <h2 class="text-sm font-semibold text-slate-300 mb-3">ไฟล์ backup ที่มี — restore / ดาวน์โหลด / ลบ</h2>
+  {% if backup_files %}
+  <table class="w-full text-sm">
+    <thead class="text-slate-400 text-xs uppercase tracking-wide border-b border-slate-700">
+      <tr>
+        <th class="px-2 py-2 text-left">ไฟล์</th>
+        <th class="px-2 py-2 text-right">ขนาด</th>
+        <th class="px-2 py-2 text-right">เวลา</th>
+        <th class="px-2 py-2 text-right">การจัดการ</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for f in backup_files %}
+      <tr class="border-b border-slate-700/30">
+        <td class="px-2 py-2 font-mono text-xs break-all">{{ f.name }}</td>
+        <td class="px-2 py-2 text-right text-xs text-slate-400">{{ f.size_human }}</td>
+        <td class="px-2 py-2 text-right text-xs text-slate-400">{{ f.modified_human }}</td>
+        <td class="px-2 py-2 text-right space-x-3 whitespace-nowrap">
+          <a href="/backup/download?filename={{ f.name }}" class="text-xs text-blue-400 hover:underline">download</a>
+          <button onclick="restoreFile('{{ f.name }}')" class="text-xs text-amber-400 hover:underline">restore</button>
+          <form method="post" action="/backup/file-delete" class="inline" onsubmit="return confirm('ลบไฟล์ backup {{ f.name }}?')">
+            <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+            <input type="hidden" name="filename" value="{{ f.name }}">
+            <button class="text-xs text-rose-400 hover:underline">ลบ</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="text-slate-500 text-sm">ยังไม่มีไฟล์ใน {{ backup_dir }}</p>
+  {% endif %}
+</div>
+
+<form id="restore-form" method="post" action="/backup/restore" style="display:none">
+  <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+  <input type="hidden" name="filename" id="restore-file">
+  <input type="hidden" name="only" id="restore-only">
+  <input type="hidden" name="domain" id="restore-domain">
+</form>
+
+<script>
+async function restoreFile(filename) {
+  const only = prompt(`Restore "${filename}"\n\nเลือกประเภท:\n  all = ทั้งหมด\n  databases = เฉพาะฐานข้อมูล\n  web = เฉพาะไฟล์เว็บ (ต้องระบุ domain)\n  dns = เฉพาะ DNS (ต้องระบุ domain)`, 'all');
+  if (!only) return;
+  let domain = '';
+  if (['databases','web','dns'].includes(only)) {
+    domain = prompt('โดเมน:', '') || '';
+  }
+  if (!confirm(`Restore ${filename} (${only}${domain ? ' / '+domain : ''})?\n\n⚠️ จะเขียนทับข้อมูลเดิม`)) return;
+
+  const data = new FormData();
+  data.append('csrf', document.querySelector('#restore-form input[name=csrf]').value);
+  data.append('filename', filename);
+  data.append('only', only);
+  data.append('domain', domain);
+
+  const out = document.getElementById('output');
+  const status = document.getElementById('output-status');
+  out.textContent = '';
+  status.textContent = 'กำลัง restore...';
+  try {
+    const res = await fetch('/backup/restore', {method:'POST', body: data});
+    if (!res.ok) { out.textContent = await res.text(); status.textContent='ผิดพลาด'; return; }
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      out.textContent += dec.decode(value, {stream:true});
+      out.scrollTop = out.scrollHeight;
+    }
+    status.textContent = 'เสร็จ';
+  } catch(e) { out.textContent += `\nError: ${e.message}`; status.textContent='ผิดพลาด'; }
+}
+</script>
 
 <script>
 async function runBackup(event, form, url) {

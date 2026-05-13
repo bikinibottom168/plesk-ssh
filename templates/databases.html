@@ -23,12 +23,13 @@
     <tbody>
       {% for db in databases %}
       <tr class="border-t border-slate-700/50 hover:bg-slate-700/30">
-        <td class="px-4 py-3 font-mono">{{ db.name }}</td>
+        <td class="px-4 py-3"><a href="/databases/{{ db.name }}" class="text-blue-400 hover:underline font-mono">{{ db.name }}</a></td>
         <td class="px-4 py-3 text-xs text-slate-400">{{ db.type }}</td>
         <td class="px-4 py-3 font-mono text-xs">{{ db.domain }}</td>
-        <td class="px-4 py-3 text-right space-x-2">
-          <a href="{{ panel_url(request) }}/phpmyadmin/" target="_blank" class="text-blue-400 hover:underline">phpMyAdmin ↗</a>
-          <a href="/backup?domain={{ db.domain }}#db" class="text-blue-400 hover:underline">backup</a>
+        <td class="px-4 py-3 text-right space-x-3 whitespace-nowrap">
+          <a href="/databases/{{ db.name }}" class="text-xs text-blue-400 hover:underline">เปิด</a>
+          <a href="/databases/{{ db.name }}/sql" class="text-xs text-blue-400 hover:underline">SQL</a>
+          <a href="{{ panel_url(request) }}/phpmyadmin/" target="_blank" class="text-xs text-slate-400 hover:underline">phpMyAdmin ↗</a>
         </td>
       </tr>
       {% endfor %}

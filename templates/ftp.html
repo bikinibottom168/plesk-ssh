@@ -16,7 +16,22 @@
 </form>
 
 {% if error %}
-<div class="mb-4 px-4 py-3 bg-rose-900/40 border border-rose-700/40 text-rose-200 rounded">{{ error }}</div>
+<div class="mb-4 px-4 py-3 bg-rose-900/40 border border-rose-700/40 text-rose-200 rounded whitespace-pre-wrap">{{ error }}</div>
+{% endif %}
+
+{% if q_domain %}
+<div class="bg-slate-800 rounded-lg border border-slate-700 p-5 mb-6">
+  <h2 class="text-sm font-semibold text-slate-300 mb-3">สร้าง FTP user ใหม่สำหรับ <code>{{ q_domain }}</code></h2>
+  <form method="post" action="/ftp/create" class="grid grid-cols-1 md:grid-cols-4 gap-3">
+    <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+    <input type="hidden" name="domain" value="{{ q_domain }}">
+    <input name="login" placeholder="ชื่อผู้ใช้" required pattern="[A-Za-z0-9._-]{1,32}" class="px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm focus:outline-none focus:border-blue-500">
+    <input name="password" type="text" placeholder="รหัสผ่าน (≥5)" required minlength="5" class="px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm focus:outline-none focus:border-blue-500">
+    <input name="home" placeholder="home path (ไม่บังคับ)" class="px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm focus:outline-none focus:border-blue-500">
+    <button class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded text-sm">สร้าง</button>
+  </form>
+  <p class="text-xs text-slate-500 mt-2">หมายเหตุ: <code>-owner</code> ใช้ชื่อ subscription หลัก — ถ้าโดเมนนี้เป็น addon ให้ใส่ subscription main ในช่องค้นหาแทน</p>
+</div>
 {% endif %}
 
 {% if results %}
@@ -28,6 +43,7 @@
         <th class="px-4 py-3 text-left">User</th>
         <th class="px-4 py-3 text-left">Password</th>
         <th class="px-4 py-3 text-left">Type</th>
+        <th class="px-4 py-3 text-right">การจัดการ</th>
       </tr>
     </thead>
     <tbody>
@@ -39,13 +55,49 @@
           <span class="cursor-pointer select-all" onclick="navigator.clipboard.writeText(this.textContent)">{{ r.password }}</span>
         </td>
         <td class="px-4 py-3 text-xs text-slate-400">{{ r.type }}</td>
+        <td class="px-4 py-3 text-right space-x-3 whitespace-nowrap">
+          <button type="button" onclick="changeFtpPassword('{{ r.user }}', '{{ r.domain }}')" class="text-xs text-amber-400 hover:underline">เปลี่ยนรหัส</button>
+          <button type="button" onclick="deleteFtp('{{ r.user }}', '{{ r.domain }}')" class="text-xs text-rose-400 hover:underline">ลบ</button>
+        </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
-<p class="text-xs text-slate-500 mt-3">คลิกที่รหัสผ่านเพื่อก็อปปี้ · ถ้า type ไม่ใช่ <code>plain</code> และมีคำว่า <code>$AES</code> ระบบลองถอดรหัสให้แล้ว</p>
+<p class="text-xs text-slate-500 mt-3">คลิกที่รหัสผ่านเพื่อก็อปปี้ · ถ้า type ไม่ใช่ <code>plain</code> และมีคำว่า <code>$AES</code> ระบบลองถอดรหัสให้แล้ว · ปุ่ม "ลบ" ใช้ได้กับ additional FTP user (main subscription user ลบไม่ได้)</p>
 {% elif q_domain or q_user or q_all %}
-<p class="text-slate-400">ไม่พบข้อมูล</p>
+<p class="text-slate-400">ไม่พบข้อมูล{% if q_domain %} — ลองสร้าง FTP user ใหม่ด้านบนได้{% endif %}</p>
 {% endif %}
+
+<form id="pw-form" method="post" action="/ftp/password" style="display:none">
+  <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+  <input type="hidden" name="login" id="pw-login">
+  <input type="hidden" name="domain" id="pw-domain">
+  <input type="hidden" name="new_password" id="pw-new">
+</form>
+
+<form id="del-form" method="post" action="/ftp/delete" style="display:none">
+  <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+  <input type="hidden" name="login" id="del-login">
+  <input type="hidden" name="domain" id="del-domain">
+</form>
+
+<script>
+function changeFtpPassword(login, domain) {
+  const pw = prompt(`รหัสผ่านใหม่สำหรับ FTP user "${login}":\n(อย่างน้อย 5 ตัว)`);
+  if (!pw) return;
+  if (pw.length < 5) { alert('รหัสผ่านสั้นเกินไป'); return; }
+  document.getElementById('pw-login').value = login;
+  document.getElementById('pw-domain').value = domain === '-' ? '' : domain;
+  document.getElementById('pw-new').value = pw;
+  document.getElementById('pw-form').submit();
+}
+
+function deleteFtp(login, domain) {
+  if (!confirm(`ยืนยันลบ FTP user "${login}"?\n(main subscription user จะลบไม่ได้)`)) return;
+  document.getElementById('del-login').value = login;
+  document.getElementById('del-domain').value = domain === '-' ? '' : domain;
+  document.getElementById('del-form').submit();
+}
+</script>
 {% endblock %}

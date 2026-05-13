@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}{{ table_name }} · {{ db_name }}{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+  <div>
+    <a href="/databases/{{ db_name }}" class="text-xs text-slate-400 hover:text-slate-200">← {{ db_name }}</a>
+    <h1 class="text-2xl font-semibold mt-1 font-mono">{{ table_name }}</h1>
+    <p class="text-xs text-slate-500 mt-1">total: {{ total }} rows · หน้า {{ page }}/{{ total_pages }}</p>
+  </div>
+  <a href="/databases/{{ db_name }}/sql?prefill=SELECT+*+FROM+{{ table_name }}+LIMIT+10" class="px-3 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm">SQL Query</a>
+</div>
+
+{% if error %}
+<div class="mb-4 px-4 py-3 bg-rose-900/40 border border-rose-700/40 text-rose-200 rounded whitespace-pre-wrap">{{ error }}</div>
+{% endif %}
+
+{% if columns %}
+<div class="bg-slate-800 rounded-lg border border-slate-700 overflow-auto">
+  <table class="w-full text-xs">
+    <thead class="bg-slate-900/50 text-slate-400 uppercase tracking-wide">
+      <tr>
+        {% for c in columns %}<th class="px-3 py-2 text-left font-mono whitespace-nowrap">{{ c }}</th>{% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr class="border-t border-slate-700/50 hover:bg-slate-700/30">
+        {% for c in columns %}
+        <td class="px-3 py-2 font-mono align-top whitespace-pre-wrap break-all max-w-md">{{ row[c] }}</td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if total_pages > 1 %}
+<nav class="flex items-center justify-center gap-2 mt-4 text-sm">
+  {% if page > 1 %}
+    <a href="?page={{ page-1 }}&size={{ size }}" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded">← ก่อน</a>
+  {% endif %}
+  <span class="text-slate-400">หน้า {{ page }} / {{ total_pages }}</span>
+  {% if page < total_pages %}
+    <a href="?page={{ page+1 }}&size={{ size }}" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded">ถัดไป →</a>
+  {% endif %}
+</nav>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}DNS · {{ domain }}{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <div>
+    <a href="/domains/{{ domain }}" class="text-xs text-slate-400 hover:text-slate-200">← {{ domain }}</a>
+    <h1 class="text-2xl font-semibold mt-1">DNS records — <span class="font-mono">{{ domain }}</span></h1>
+  </div>
+</div>
+
+{% if error %}
+<div class="mb-4 px-4 py-3 bg-rose-900/40 border border-rose-700/40 text-rose-200 rounded">{{ error }}</div>
+{% endif %}
+
+<div class="bg-slate-800 rounded-lg border border-slate-700 p-5 mb-6">
+  <h2 class="text-sm font-semibold text-slate-300 mb-3">เพิ่ม record</h2>
+  <form method="post" action="/domains/{{ domain }}/dns/add" class="grid grid-cols-1 md:grid-cols-5 gap-2">
+    <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+    <select name="type" required class="px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm">
+      {% for t in ['A','AAAA','CNAME','MX','TXT','NS','SRV'] %}<option>{{ t }}</option>{% endfor %}
+    </select>
+    <input name="host" placeholder="host (เช่น @, www, mail)" class="px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm">
+    <input name="value" required placeholder="value" class="px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm">
+    <input name="opt" placeholder="opt (MX priority, ฯลฯ)" class="px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm">
+    <button class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded text-sm">เพิ่ม</button>
+  </form>
+</div>
+
+<div class="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
+  <table class="w-full text-sm">
+    <thead class="bg-slate-900/50 text-slate-400 text-xs uppercase tracking-wide">
+      <tr>
+        <th class="px-4 py-3 text-left">Type</th>
+        <th class="px-4 py-3 text-left">Host</th>
+        <th class="px-4 py-3 text-left">Value</th>
+        <th class="px-4 py-3 text-left">Opt</th>
+        <th class="px-4 py-3 text-right">การจัดการ</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in records %}
+      <tr class="border-t border-slate-700/50 hover:bg-slate-700/30">
+        <td class="px-4 py-3 font-mono text-xs">{{ r.type }}</td>
+        <td class="px-4 py-3 font-mono text-xs">{{ r.host }}</td>
+        <td class="px-4 py-3 font-mono text-xs break-all max-w-md">{{ r.value }}</td>
+        <td class="px-4 py-3 font-mono text-xs">{{ r.opt }}</td>
+        <td class="px-4 py-3 text-right">
+          <form method="post" action="/domains/{{ domain }}/dns/del" class="inline" onsubmit="return confirm('ลบ record นี้?')">
+            <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+            <input type="hidden" name="record_id" value="{{ r.id }}">
+            <button class="text-xs text-rose-400 hover:underline">ลบ</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

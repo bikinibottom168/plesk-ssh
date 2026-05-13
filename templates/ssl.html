@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}SSL · {{ domain }}{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <div>
+    <a href="/domains/{{ domain }}" class="text-xs text-slate-400 hover:text-slate-200">← {{ domain }}</a>
+    <h1 class="text-2xl font-semibold mt-1">SSL — <span class="font-mono">{{ domain }}</span></h1>
+  </div>
+</div>
+
+<div class="bg-slate-800 rounded-lg border border-slate-700 p-5 mb-6">
+  <h2 class="text-sm font-semibold text-slate-300 mb-3">สถานะปัจจุบัน</h2>
+  <dl class="space-y-2 text-sm">
+    <div class="flex"><dt class="w-32 text-slate-400">SSL/TLS:</dt><dd>
+      {% if info.ssl == 'true' or info.ssl == '1' %}
+        <span class="text-emerald-400">เปิดใช้งาน</span>
+      {% else %}
+        <span class="text-rose-400">ปิด</span>
+      {% endif %}
+    </dd></div>
+    <div class="flex"><dt class="w-32 text-slate-400">Cert name:</dt><dd class="font-mono text-xs">{{ info.cert_name or '—' }}</dd></div>
+    <div class="flex"><dt class="w-32 text-slate-400">Cert file:</dt><dd class="font-mono text-xs break-all">{{ info.cert_file or '—' }}</dd></div>
+  </dl>
+</div>
+
+<div class="bg-slate-800 rounded-lg border border-slate-700 p-5 mb-6">
+  <h2 class="text-sm font-semibold text-slate-300 mb-3">ติดตั้ง Let's Encrypt</h2>
+  <form onsubmit="return runLE(event, this)" class="space-y-3">
+    <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+    <input name="email" type="email" required placeholder="อีเมล (สำหรับแจ้งเตือนหมดอายุ)" class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm">
+    <label class="flex items-center gap-2 text-sm"><input type="checkbox" name="secure_www" value="1" checked> ครอบ www.{{ domain }} ด้วย</label>
+    <button class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded text-sm">ติดตั้ง</button>
+  </form>
+  <p class="text-xs text-slate-500 mt-2">DNS ของ {{ domain }} ต้องชี้มาที่เซิร์ฟเวอร์นี้ก่อน LE ถึงจะ verify ได้</p>
+</div>
+
+<div class="bg-slate-800 rounded-lg border border-slate-700 p-5">
+  <h2 class="text-sm font-semibold text-slate-300 mb-3">ผลลัพธ์</h2>
+  <pre id="le-output" class="text-xs bg-slate-950 p-4 rounded border border-slate-700 max-h-96 overflow-auto whitespace-pre-wrap">รออินพุต...</pre>
+</div>
+
+<script>
+async function runLE(e, form) {
+  e.preventDefault();
+  const out = document.getElementById('le-output');
+  out.textContent = '';
+  try {
+    const res = await fetch('/domains/{{ domain }}/ssl/letsencrypt', {method:'POST', body: new FormData(form)});
+    if (!res.ok) { out.textContent = await res.text(); return false; }
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      out.textContent += dec.decode(value, {stream:true});
+      out.scrollTop = out.scrollHeight;
+    }
+  } catch(err) { out.textContent += `\nError: ${err.message}`; }
+  return false;
+}
+</script>
+{% endblock %}
