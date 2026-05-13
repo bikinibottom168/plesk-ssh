@@ -238,7 +238,7 @@ def list_databases() -> List[Dict]:
 async def login_page(request: Request):
     if is_authed(request):
         return RedirectResponse("/", status_code=303)
-    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+    return templates.TemplateResponse(request, "login.html", {"error": None})
 
 
 @app.post("/login")
@@ -252,8 +252,9 @@ async def login(request: Request, username: str = Form(...), password: str = For
             ok = False
     if not ok:
         return templates.TemplateResponse(
+            request,
             "login.html",
-            {"request": request, "error": "ผู้ใช้หรือรหัสไม่ถูกต้อง"},
+            {"error": "ผู้ใช้หรือรหัสไม่ถูกต้อง"},
             status_code=401,
         )
     request.session["user"] = username
@@ -272,8 +273,8 @@ async def logout(request: Request):
 async def dashboard(request: Request):
     if not is_authed(request):
         return RedirectResponse("/login", status_code=303)
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request, "user": request.session["user"],
+    return templates.TemplateResponse(request, "dashboard.html", {
+        "user": request.session["user"],
         "active": "dashboard",
         "domain_count": len(list_domains()),
     })
@@ -285,8 +286,8 @@ async def dashboard(request: Request):
 async def domains_page(request: Request):
     if not is_authed(request):
         return RedirectResponse("/login", status_code=303)
-    return templates.TemplateResponse("domains.html", {
-        "request": request, "user": request.session["user"],
+    return templates.TemplateResponse(request, "domains.html", {
+        "user": request.session["user"],
         "active": "domains",
         "domains": list_domains(),
     })
@@ -296,8 +297,8 @@ async def domains_page(request: Request):
 async def domain_detail(name: str, request: Request):
     if not is_authed(request):
         return RedirectResponse("/login", status_code=303)
-    return templates.TemplateResponse("domain_detail.html", {
-        "request": request, "user": request.session["user"],
+    return templates.TemplateResponse(request, "domain_detail.html", {
+        "user": request.session["user"],
         "active": "domains", "domain": name,
         "info": get_domain_info(name),
         "php_handlers": list_php_handlers(),
@@ -339,8 +340,8 @@ async def ftp_page(request: Request, domain: Optional[str] = None,
             results = get_ftp_passwords(domain, user, bool(all))
         except HTTPException as e:
             error = e.detail
-    return templates.TemplateResponse("ftp.html", {
-        "request": request, "user": request.session["user"],
+    return templates.TemplateResponse(request, "ftp.html", {
+        "user": request.session["user"],
         "active": "ftp",
         "results": results, "error": error,
         "q_domain": domain, "q_user": user, "q_all": all,
@@ -353,8 +354,8 @@ async def ftp_page(request: Request, domain: Optional[str] = None,
 async def backup_page(request: Request, domain: Optional[str] = None):
     if not is_authed(request):
         return RedirectResponse("/login", status_code=303)
-    return templates.TemplateResponse("backup.html", {
-        "request": request, "user": request.session["user"],
+    return templates.TemplateResponse(request, "backup.html", {
+        "user": request.session["user"],
         "active": "backup",
         "domains": list_domains(), "backup_dir": BACKUP_DIR,
         "selected_domain": domain,
@@ -485,8 +486,8 @@ async def files_page(request: Request, path: str = ""):
             except OSError:
                 continue
 
-    return templates.TemplateResponse("files.html", {
-        "request": request, "user": request.session["user"],
+    return templates.TemplateResponse(request, "files.html", {
+        "user": request.session["user"],
         "active": "files",
         "current_path": rel, "parent_path": parent,
         "items": items, "is_file": is_file,
@@ -564,8 +565,8 @@ async def databases_page(request: Request):
         dbs = list_databases()
     except HTTPException as e:
         error = e.detail
-    return templates.TemplateResponse("databases.html", {
-        "request": request, "user": request.session["user"],
+    return templates.TemplateResponse(request, "databases.html", {
+        "user": request.session["user"],
         "active": "databases",
         "databases": dbs, "error": error,
     })
