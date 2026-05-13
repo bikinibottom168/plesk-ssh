@@ -159,6 +159,20 @@ if [ ! -f "$CONFIG_DIR/config.json" ]; then
   sed -i "s|CHANGE_ME_TO_RANDOM_64_HEX_CHARS|$SECRET|" "$CONFIG_DIR/config.json"
 fi
 
+# ---------- admin password ----------
+echo "==> ตั้งรหัสผ่าน admin"
+ADMIN_HASH=$("$VENV_DIR/bin/python" -c "import bcrypt; print(bcrypt.hashpw(b'iceza0251', bcrypt.gensalt()).decode())")
+"$VENV_DIR/bin/python" - <<PYEOF
+import json
+cfg_path = "$CONFIG_DIR/config.json"
+with open(cfg_path) as f:
+    cfg = json.load(f)
+cfg["users"] = {"admin": "$ADMIN_HASH"}
+with open(cfg_path, "w") as f:
+    json.dump(cfg, f, indent=2)
+print("    ✓ admin / iceza0251")
+PYEOF
+
 # ---------- copy files ----------
 echo "==> Copy ไฟล์ไป $INSTALL_DIR"
 if command -v rsync >/dev/null 2>&1; then
@@ -176,10 +190,22 @@ else
 fi
 
 # ---------- systemd ----------
+# Verify templates were copied
+if [ ! -d "$INSTALL_DIR/templates" ]; then
+  echo "ERROR: ไม่พบ $INSTALL_DIR/templates หลัง copy — UI จะใช้งานไม่ได้" >&2
+  exit 1
+fi
+
 echo "==> ติดตั้ง systemd unit"
 cp "$SOURCE_DIR/plesk-dashboard.service" /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable plesk-dashboard
+
+# Restart ถ้ารันอยู่ (เพื่อให้โหลด config / โค้ดใหม่)
+if systemctl is-active --quiet plesk-dashboard; then
+  echo "==> Restart service"
+  systemctl restart plesk-dashboard
+fi
 
 # ---------- firewall ----------
 echo "==> เปิด firewall ports"
@@ -193,18 +219,11 @@ cat <<EOF
 
 ติดตั้งเสร็จเรียบร้อย
 
-  1) ตั้งรหัส admin:
-       $VENV_DIR/bin/python $INSTALL_DIR/server.py --hash-password 'YOUR_PASSWORD'
-     เอา hash ที่ได้ไปใส่ใน $CONFIG_DIR/config.json (key: users.admin)
+  Login:        admin / iceza0251
 
-  2) สตาร์ท:
-       systemctl start plesk-dashboard
-
-  3) ตรวจสอบ:
-       systemctl status plesk-dashboard
-       journalctl -u plesk-dashboard -f
-
-  4) เปิดเว็บ:
-       https://<server-ip>:9443
+  สตาร์ท:       systemctl start plesk-dashboard
+  ตรวจสอบ:      systemctl status plesk-dashboard
+  ดู log:       journalctl -u plesk-dashboard -f
+  เปิดเว็บ:     https://<server-ip>:9443
 
 EOF
