@@ -58,5 +58,40 @@
     <h2 class="text-sm font-semibold text-slate-300 mt-6 mb-3">สำรองข้อมูล</h2>
     <a href="/backup?domain={{ domain }}" class="inline-block px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded text-sm">ไปหน้า Backup</a>
   </div>
+
+  <div class="bg-slate-800 rounded-lg border border-slate-700 p-5 lg:col-span-2">
+    <h2 class="text-sm font-semibold text-slate-300 mb-1">Domain Alias (mirror)</h2>
+    <p class="text-xs text-slate-500 mb-4">โดเมน alias จะใช้เนื้อหา/เว็บชุดเดียวกับ <span class="font-mono">{{ domain }}</span> เหมือนกระจกสะท้อน</p>
+
+    {% if aliases %}
+    <ul class="space-y-2 mb-5">
+      {% for a in aliases %}
+      <li class="flex items-center justify-between bg-slate-900 border border-slate-700 rounded px-3 py-2">
+        <span class="font-mono text-sm">{{ a.name }}
+          {% if a.status and a.status != '0' %}<span class="text-xs text-amber-400 ml-2">(disabled)</span>{% endif %}
+        </span>
+        <form method="post" action="/domains/{{ domain }}/alias/delete" onsubmit="return confirm('ลบ alias {{ a.name }} ?')">
+          <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+          <input type="hidden" name="alias" value="{{ a.name }}">
+          <button class="px-3 py-1 bg-red-600 hover:bg-red-500 rounded text-xs">ลบ</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-xs text-slate-500 mb-5">ยังไม่มี alias</p>
+    {% endif %}
+
+    <form method="post" action="/domains/{{ domain }}/alias" class="space-y-3">
+      <input type="hidden" name="csrf" value="{{ csrf_token(request) }}">
+      <input name="alias" placeholder="ชื่อ alias เช่น domain-2.com" required
+             class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-sm font-mono focus:outline-none focus:border-blue-500">
+      <div class="flex gap-6 text-sm text-slate-300">
+        <label class="flex items-center gap-2"><input type="checkbox" name="mail" value="1"> รับเมลด้วย</label>
+        <label class="flex items-center gap-2"><input type="checkbox" name="dns" value="1" checked> สร้าง DNS zone</label>
+      </div>
+      <button class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm">เพิ่ม alias</button>
+    </form>
+  </div>
 </div>
 {% endblock %}

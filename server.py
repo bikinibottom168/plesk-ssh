@@ -146,6 +146,20 @@ def safe_login(name: str) -> str:
     return name
 
 
+_DOMAIN_RE = re.compile(
+    r"^(?=.{1,253}$)"
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$"
+)
+
+
+def safe_domain(name: str) -> str:
+    name = (name or "").strip().lower()
+    if not _DOMAIN_RE.match(name):
+        raise HTTPException(400, f"ชื่อโดเมนไม่ถูกต้อง: {name!r}")
+    return name
+
+
 def safe_join(base: str, *parts: str) -> Path:
     """Resolve base/parts and ensure result stays inside base."""
     base_p = Path(base).resolve()
@@ -215,6 +229,24 @@ def get_domain_info(domain: str) -> Dict[str, str]:
             if k:
                 info[k] = v
     return info
+
+
+def list_domain_aliases(domain: str) -> List[Dict]:
+    """Domain aliases (mirrors) of a given main domain, from the Plesk DB."""
+    safe_sql_value(domain)
+    sql = (
+        "SELECT da.name, da.status "
+        "FROM domainaliases da "
+        "JOIN domains d ON d.id = da.dom_id "
+        f"WHERE d.name = '{domain}' "
+        "ORDER BY da.name;"
+    )
+    out = []
+    for r in plesk_db(sql):
+        while len(r) < 2:
+            r.append("")
+        out.append({"name": r[0], "status": r[1]})
+    return out
 
 
 def list_php_handlers() -> List[Dict]:
@@ -502,6 +534,7 @@ async def domain_detail(name: str, request: Request):
         "active": "domains", "domain": name,
         "info": get_domain_info(name),
         "php_handlers": list_php_handlers(),
+        "aliases": list_domain_aliases(name),
     })
 
 
@@ -534,6 +567,46 @@ async def domain_set_php(name: str, request: Request, handler: str = Form(...)):
         return PlainTextResponse(proc.stderr or proc.stdout, status_code=400)
     audit(request, "php_change", domain=name, handler=handler)
     return RedirectResponse(f"/domains/{name}", status_code=303)
+
+
+@app.post("/domains/{name}/alias", dependencies=[Depends(require_csrf)])
+async def domain_alias_create(name: str, request: Request,
+                              alias: str = Form(...),
+                              mail: Optional[str] = Form(None),
+                              dns: Optional[str] = Form(None)):
+    if not is_authed(request):
+        raise HTTPException(401)
+    main = safe_domain(name)
+    alias = safe_domain(alias)
+    if alias == main:
+        return PlainTextResponse("alias ต้องไม่ซ้ำกับโดเมนหลัก", status_code=400)
+    cmd = [
+        "plesk", "bin", "domalias", "--create", alias,
+        "-domain", main,
+        "-web", "true",
+        "-mail", "true" if mail else "false",
+        "-dns", "true" if dns else "false",
+    ]
+    proc = run_cmd(cmd)
+    if proc.returncode != 0:
+        audit(request, "alias_create_failed", domain=main, alias=alias)
+        return PlainTextResponse(proc.stderr or proc.stdout, status_code=400)
+    audit(request, "alias_create", domain=main, alias=alias)
+    return RedirectResponse(f"/domains/{main}", status_code=303)
+
+
+@app.post("/domains/{name}/alias/delete", dependencies=[Depends(require_csrf)])
+async def domain_alias_delete(name: str, request: Request, alias: str = Form(...)):
+    if not is_authed(request):
+        raise HTTPException(401)
+    main = safe_domain(name)
+    alias = safe_domain(alias)
+    proc = run_cmd(["plesk", "bin", "domalias", "--remove", alias])
+    if proc.returncode != 0:
+        audit(request, "alias_delete_failed", domain=main, alias=alias)
+        return PlainTextResponse(proc.stderr or proc.stdout, status_code=400)
+    audit(request, "alias_delete", domain=main, alias=alias)
+    return RedirectResponse(f"/domains/{main}", status_code=303)
 
 
 # ---------- routes: ftp ----------
