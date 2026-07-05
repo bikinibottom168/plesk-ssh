@@ -232,21 +232,36 @@ def get_domain_info(domain: str) -> Dict[str, str]:
 
 
 def list_domain_aliases(domain: str) -> List[Dict]:
-    """Domain aliases (mirrors) of a given main domain, from the Plesk DB."""
+    """Domain aliases (mirrors) of a given main domain, from the Plesk DB.
+
+    The alias table/columns differ across Plesk versions, so we try a few known
+    schemas and return [] if none work (never 500 the domain page over this —
+    create/delete still work via `plesk bin domalias`).
+    """
     safe_sql_value(domain)
-    sql = (
-        "SELECT da.name, da.status "
-        "FROM domainaliases da "
+    candidates = [
+        # Plesk Obsidian: aliases live in `domains` as rows whose parent is the
+        # target domain's webspace (webspace_id), flagged by type='alias'.
+        "SELECT a.name, a.status FROM domains a "
+        "JOIN domains d ON a.webspace_id = d.id "
+        f"WHERE d.name = '{domain}' AND a.type = 'alias' ORDER BY a.name;",
+        # Older schema: dedicated domainaliases table keyed by dom_id.
+        "SELECT da.name, da.status FROM domainaliases da "
         "JOIN domains d ON d.id = da.dom_id "
-        f"WHERE d.name = '{domain}' "
-        "ORDER BY da.name;"
-    )
-    out = []
-    for r in plesk_db(sql):
-        while len(r) < 2:
-            r.append("")
-        out.append({"name": r[0], "status": r[1]})
-    return out
+        f"WHERE d.name = '{domain}' ORDER BY da.name;",
+    ]
+    for sql in candidates:
+        try:
+            rows = plesk_db(sql)
+        except HTTPException:
+            continue
+        out = []
+        for r in rows:
+            while len(r) < 2:
+                r.append("")
+            out.append({"name": r[0], "status": r[1]})
+        return out
+    return []
 
 
 def list_php_handlers() -> List[Dict]:
